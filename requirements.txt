@@ -1,0 +1,8 @@
+deap>=1.4.1
+gplearn>=0.4.0
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+PyYAML>=6.0
+matplotlib>=3.7.0
+pytest>=7.4.0

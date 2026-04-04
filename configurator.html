@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K8s GP Scheduler — Configurator</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   CSS — Dark/Light theme, responsive layout
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface2: #f0f1f5;
+  --border: #d1d5db;
+  --text: #1f2937;
+  --text2: #6b7280;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --code-bg: #1e293b;
+  --code-text: #e2e8f0;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,.1);
+}
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface2: #334155;
+  --border: #475569;
+  --text: #e2e8f0;
+  --text2: #94a3b8;
+  --primary: #60a5fa;
+  --primary-hover: #3b82f6;
+  --code-bg: #0f172a;
+  --code-text: #e2e8f0;
+  --shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow);
+}
+.app-header h1 { font-size: 1.25rem; font-weight: 600; }
+.app-header h1 span { color: var(--primary); }
+.header-actions { display: flex; gap: 8px; align-items: center; }
+
+/* Theme toggle */
+.theme-toggle {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: .85rem;
+  color: var(--text);
+}
+.theme-toggle:hover { border-color: var(--primary); }
+
+/* Layout */
+.container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 20px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+.tab-btn {
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 500;
+  color: var(--text2);
+  white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Form fields */
+.field-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field label {
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.field label .tooltip-icon, .th-tooltip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  font-size: .7rem;
+  cursor: help;
+  color: var(--text2);
+  flex-shrink: 0;
+  position: relative;
+}
+.tooltip-icon[data-tip]::after, .th-tooltip[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: .78rem;
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  width: max-content;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+  z-index: 500;
+}
+.tooltip-icon[data-tip]:hover::after, .th-tooltip[data-tip]:hover::after {
+  opacity: 1;
+}
+.tooltip-icon[data-tip]::before, .th-tooltip[data-tip]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--code-bg);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s;
+  z-index: 500;
+}
+.tooltip-icon[data-tip]:hover::before, .th-tooltip[data-tip]:hover::before {
+  opacity: 1;
+}
+.field input, .field select, .field textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: .9rem;
+  transition: border-color .15s;
+}
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59,130,246,.15);
+}
+.field input.invalid, .field select.invalid {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(239,68,68,.12);
+}
+.field .error-msg {
+  font-size: .75rem;
+  color: var(--danger);
+  min-height: 1em;
+}
+
+/* Range pair (two inputs side by side) */
+.range-pair {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.range-pair input {
+  flex: 1 1 80px;
+  min-width: 80px;
+}
+.range-pair .range-sep {
+  color: var(--text2);
+  flex-shrink: 0;
+  font-weight: 500;
+}
+@media (max-width: 500px) {
+  .range-pair { gap: 4px; }
+  .range-pair input { min-width: 60px; }
+}
+
+/* Sliders */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--primary);
+}
+.slider-row .slider-val {
+  min-width: 40px;
+  text-align: right;
+  font-size: .85rem;
+  font-weight: 500;
+}
+
+/* Linked weight group */
+.weight-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.weight-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 50px;
+  align-items: center;
+  gap: 8px;
+}
+.weight-row label { font-size: .85rem; color: var(--text2); }
+.weight-row input[type="range"] { width: 100%; accent-color: var(--primary); }
+.weight-row .w-val { font-size: .85rem; font-weight: 600; text-align: right; }
+.weight-sum { font-size: .8rem; color: var(--text2); text-align: right; }
+.weight-sum.valid { color: var(--success); }
+.weight-sum.invalid { color: var(--danger); }
+
+/* Fitness pie chart */
+.fitness-vis {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin: 12px 0;
+}
+.fitness-vis canvas { width: 120px; height: 120px; }
+.fitness-legend { font-size: .82rem; }
+.fitness-legend div { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.fitness-legend .dot { width: 12px; height: 12px; border-radius: 3px; }
+
+/* Node templates table */
+.node-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+.node-table th, .node-table td {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  font-size: .85rem;
+  text-align: left;
+}
+.node-table th { background: var(--surface2); font-weight: 600; font-size: .8rem; }
+.node-table input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: .85rem;
+}
+.node-table input:focus { outline: none; border-color: var(--primary); }
+.node-table .del-btn {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 2px 6px;
+}
+.node-table .del-btn:hover { background: rgba(239,68,68,.1); border-radius: 4px; }
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: .85rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background .15s, border-color .15s;
+}
+.btn:hover { border-color: var(--primary); background: var(--surface2); }
+.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-sm { padding: 5px 12px; font-size: .8rem; }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Presets bar */
+.presets-bar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  box-shadow: var(--shadow);
+}
+.presets-bar span { font-size: .85rem; font-weight: 600; color: var(--text2); }
+
+/* YAML output */
+.yaml-output {
+  background: var(--code-bg);
+  color: var(--code-text);
+  border-radius: var(--radius);
+  padding: 16px;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: .82rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+}
+
+/* Status bar */
+.status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: .82rem;
+  z-index: 100;
+  box-shadow: 0 -1px 3px rgba(0,0,0,.08);
+}
+.status-bar .status-text { color: var(--text2); }
+.status-bar .status-text.valid { color: var(--success); }
+.status-bar .status-text.invalid { color: var(--danger); }
+.status-actions { display: flex; gap: 8px; }
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  background: var(--success);
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: .85rem;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity .3s, transform .3s;
+  z-index: 200;
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+
+/* Conditional sections */
+.conditional { transition: opacity .2s; }
+.conditional.hidden { display: none; }
+
+/* Responsive */
+@media (max-width: 700px) {
+  .field-group { grid-template-columns: 1fr; }
+  .app-header { padding: 10px 16px; }
+  .container { padding: 12px; }
+  .tabs { gap: 0; }
+  .tab-btn { padding: 8px 12px; font-size: .8rem; }
+}
+
+body { padding-bottom: 56px; } /* space for status bar */
+
+/* Import modal */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 90%;
+  max-width: 700px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,.2);
+}
+.modal h3 { margin-bottom: 12px; }
+.modal textarea {
+  width: 100%;
+  height: 300px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: .82rem;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  resize: vertical;
+}
+.modal .btn-group { margin-top: 12px; justify-content: flex-end; }
+
+/* Estimate box */
+.estimate-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-size: .82rem;
+  margin-top: 12px;
+  color: var(--text2);
+}
+.estimate-box strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     HEADER
+     ═══════════════════════════════════════════════════════════════════ -->
+<header class="app-header">
+  <h1>⚙️ <span>K8s GP Scheduler</span> — Configurator</h1>
+  <div class="header-actions">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Schimbă tema">🌙 Temă</button>
+  </div>
+</header>
+
+<div class="container">
+
+<!-- Presets bar -->
+<div class="presets-bar">
+  <span>Preseturi:</span>
+  <button class="btn btn-sm" onclick="loadPreset('smoke')">🧪 Smoke Test</button>
+  <button class="btn btn-sm" onclick="loadPreset('small')">📦 Small</button>
+  <button class="btn btn-sm" onclick="loadPreset('medium')">📦 Medium</button>
+  <button class="btn btn-sm" onclick="loadPreset('large')">📦 Large</button>
+  <button class="btn btn-sm" onclick="loadPreset('default')">⭐ Default</button>
+  <div style="flex:1"></div>
+  <button class="btn btn-sm" onclick="showImportModal()">📥 Import YAML</button>
+</div>
+
+<!-- Tabs -->
+<div class="tabs" role="tablist">
+  <button class="tab-btn active" onclick="switchTab('general')" data-tab="general">General</button>
+  <button class="tab-btn" onclick="switchTab('cluster')" data-tab="cluster">Cluster</button>
+  <button class="tab-btn" onclick="switchTab('workload')" data-tab="workload">Workload</button>
+  <button class="tab-btn" onclick="switchTab('gp')" data-tab="gp">GP Engine</button>
+  <button class="tab-btn" onclick="switchTab('fitness')" data-tab="fitness">Fitness</button>
+  <button class="tab-btn" onclick="switchTab('dynamics')" data-tab="dynamics">Dynamics</button>
+  <button class="tab-btn" onclick="switchTab('output')" data-tab="output">📄 YAML Output</button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: General
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-general" class="tab-panel active">
+  <div class="card">
+    <h3>Setări Experiment</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Nume experiment <span class="tooltip-icon" data-tip="Identificator unic al experimentului. Apare în numele fișierelor de output și în rapoarte.">?</span></label>
+        <input type="text" id="cfg-name" value="default_experiment">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Seed <span class="tooltip-icon" data-tip="Seed pentru RNG. Același seed → aceleași rezultate (reproducibilitate completă). Implicit: 42.">?</span></label>
+        <input type="number" id="cfg-seed" value="42" min="0">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Instanțe training <span class="tooltip-icon" data-tip="Nr. scenarii de simulare pentru antrenare GP. Mai multe = regulă mai robustă dar mai lent. Interval: 1–50.">?</span></label>
+        <input type="number" id="cfg-train-instances" value="5" min="1" max="50">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Instanțe test <span class="tooltip-icon" data-tip="Nr. instanțe noi (nevăzute la training) pentru evaluarea finală a regulii evoluate. Interval: 1–50.">?</span></label>
+        <input type="number" id="cfg-test-instances" value="5" min="1" max="50">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Dynamic instances <span class="tooltip-icon" data-tip="Dacă „Da", instanțele de training se regenerează la fiecare generație GP, prevenind overfitting-ul pe scenarii fixe.">?</span></label>
+        <select id="cfg-dynamic-instances">
+          <option value="false" selected>Nu</option>
+          <option value="true">Da</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Director output <span class="tooltip-icon" data-tip="Calea relativă unde se salvează rezultatele experimentului (CSV-uri, loguri, Gantt charts).">?</span></label>
+        <input type="text" id="cfg-output-dir" value="tmp/results">
+      </div>
+      <div class="field">
+        <label>Format output <span class="tooltip-icon" data-tip="CSV: tabel simplu (Excel/Pandas). JSON: format structurat pentru procesare programatică.">?</span></label>
+        <select id="cfg-output-format">
+          <option value="csv" selected>CSV</option>
+          <option value="json">JSON</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: Cluster
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-cluster" class="tab-panel">
+  <div class="card">
+    <h3>Node Templates</h3>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:12px">
+      Definește template-urile de noduri pentru cluster. Fiecare template generează <code>count</code> noduri identice.
+    </p>
+    <table class="node-table" id="node-table">
+      <thead>
+        <tr>
+          <th style="width:80px">Count <span class="th-tooltip" data-tip="Câte noduri identice se generează din acest template. Ex: 5 = 5 noduri cu aceleași specificații.">?</span></th>
+          <th>CPU (cores) <span class="th-tooltip" data-tip="Capacitatea CPU a fiecărui nod (în cores). Ex: 8.0 = 8 vCPU. Pod-urile se alocă din această capacitate.">?</span></th>
+          <th>MEM (MiB) <span class="th-tooltip" data-tip="Capacitatea de memorie a fiecărui nod (MiB). Ex: 16384 = 16 GiB. Pod-urile se alocă din această capacitate.">?</span></th>
+          <th>Cost/oră <span class="th-tooltip" data-tip="Costul per oră al fiecărui nod (unități monetare). Folosit în metrici de cost-efficiency.">?</span></th>
+          <th>Taints <span class="th-tooltip" data-tip="Taints K8s pe acest nod (separate prin virgulă). Pod-urile trebuie să le tolereze explicit. Ex: gpu, spot">?</span></th>
+          <th>Labels <span class="th-tooltip" data-tip="Label-uri K8s pe nod (format: cheie: valoare, separate prin virgulă). Folosite cu nodeSelector. Ex: disktype: ssd">?</span></th>
+          <th style="width:40px"></th>
+        </tr>
+      </thead>
+      <tbody id="node-tbody">
+        <!-- populated by JS -->
+      </tbody>
+    </table>
+    <button class="btn btn-sm" onclick="addNodeTemplate()">+ Adaugă template</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: Workload
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-workload" class="tab-panel">
+  <div class="card">
+    <h3>Parametri Workload</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Total pods <span class="tooltip-icon" data-tip="Câte pod-uri se generează per instanță de simulare. Determină dimensiunea scenariului de scheduling. Implicit: 100.">?</span></label>
+        <input type="number" id="cfg-total-pods" value="100" min="1">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Arrival rate (λ) <span class="tooltip-icon" data-tip="Rata medie Poisson de sosire (pods/unitate timp). λ=1.0 → ~1 pod/s. Valori mai mari = sosiri mai dense. Trebuie > 0.">?</span></label>
+        <input type="number" id="cfg-arrival-rate" value="1.0" min="0.01" step="0.1">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>CPU range (cores) <span class="tooltip-icon" data-tip="Intervalul request-ului CPU per pod (cores). Valorile sunt alese uniform aleator. Ex: [0.1, 2.0] → între 0.1 și 2 cores.">?</span></label>
+        <div class="range-pair">
+          <input type="number" id="cfg-cpu-min" value="0.1" min="0" step="0.1">
+          <span class="range-sep">–</span>
+          <input type="number" id="cfg-cpu-max" value="2.0" min="0" step="0.1">
+        </div>
+        <div class="error-msg" id="err-cpu-range"></div>
+      </div>
+      <div class="field">
+        <label>MEM range (MiB) <span class="tooltip-icon" data-tip="Intervalul request-ului de memorie per pod (MiB). Ex: [128, 4096] → între 128 MiB și 4 GiB.">?</span></label>
+        <div class="range-pair">
+          <input type="number" id="cfg-mem-min" value="128" min="0" step="1">
+          <span class="range-sep">–</span>
+          <input type="number" id="cfg-mem-max" value="4096" min="0" step="1">
+        </div>
+        <div class="error-msg" id="err-mem-range"></div>
+      </div>
+      <div class="field">
+        <label>Duration range (s) <span class="tooltip-icon" data-tip="Cât timp rulează fiecare pod (secunde simulate). Durata e aleasă uniform din interval.">?</span></label>
+        <div class="range-pair">
+          <input type="number" id="cfg-dur-min" value="5" min="0" step="1">
+          <span class="range-sep">–</span>
+          <input type="number" id="cfg-dur-max" value="50" min="0" step="1">
+        </div>
+        <div class="error-msg" id="err-dur-range"></div>
+      </div>
+      <div class="field">
+        <label>Namespaces <span class="tooltip-icon" data-tip="Namespace-uri K8s disponibile. Fiecare pod primește unul aleator. Câte un namespace pe linie.">?</span></label>
+        <textarea id="cfg-namespaces" rows="3" style="font-size:.82rem">default
+production
+batch</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Burst Configuration</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Burst probability <span class="tooltip-icon" data-tip="Probabilitatea ca la un moment dat să sosească un grup de pod-uri simultan (burst). 0.1 = 10% șansă la fiecare pas.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-burst-prob" min="0" max="1" step="0.01" value="0.1">
+          <span class="slider-val" id="val-burst-prob">0.10</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Burst size min <span class="tooltip-icon" data-tip="Nr. minim de pod-uri generate într-un burst. Trebuie ≥ 1.">?</span></label>
+        <input type="number" id="cfg-burst-min" value="3" min="1">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Burst size max <span class="tooltip-icon" data-tip="Nr. maxim de pod-uri generate într-un burst. Trebuie ≥ burst_size_min.">?</span></label>
+        <input type="number" id="cfg-burst-max" value="8" min="1">
+        <div class="error-msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Arrival Pattern</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Pattern <span class="tooltip-icon" data-tip="Constant: rată fixă λ. Diurnal: variază sinusoidal (simulare zi/noapte). Bursty: spike-uri aleatorii de trafic intens.">?</span></label>
+        <select id="cfg-arrival-pattern" onchange="updateArrivalUI()">
+          <option value="constant" selected>Constant</option>
+          <option value="diurnal">Diurnal (ciclu 24h)</option>
+          <option value="bursty">Bursty (spike-uri)</option>
+        </select>
+      </div>
+    </div>
+    <div id="diurnal-params" class="conditional hidden">
+      <div class="field-group">
+        <div class="field">
+          <label>Peak rate multiplier <span class="tooltip-icon" data-tip="Rata la vârf ca multiplu al λ. Ex: 3.0 = 3× rata de bază la ora de vârf.">?</span></label>
+          <input type="number" id="cfg-diurnal-peak" value="3.0" min="0.1" step="0.1">
+        </div>
+        <div class="field">
+          <label>Trough rate multiplier <span class="tooltip-icon" data-tip="Rata la minim (noaptea). Ex: 0.3 = 30% din λ. Trebuie < peak rate.">?</span></label>
+          <input type="number" id="cfg-diurnal-trough" value="0.3" min="0.01" step="0.01">
+        </div>
+      </div>
+    </div>
+    <div id="bursty-params" class="conditional hidden">
+      <div class="field-group">
+        <div class="field">
+          <label>Spike multiplier <span class="tooltip-icon" data-tip="Cu cât crește rata de sosire în timpul unui spike. Ex: 5.0 = 5× λ.">?</span></label>
+          <input type="number" id="cfg-bursty-mult" value="5.0" min="1" step="0.5">
+        </div>
+        <div class="field">
+          <label>Spike probability <span class="tooltip-icon" data-tip="Probabilitatea de a intra într-un spike la fiecare interval de timp. 0.15 = 15%.">?</span></label>
+          <div class="slider-row">
+            <input type="range" id="cfg-bursty-prob" min="0" max="1" step="0.01" value="0.15">
+            <span class="slider-val" id="val-bursty-prob">0.15</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Priority & QoS Weights</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <p style="font-size:.82rem;color:var(--text2);margin-bottom:8px">Distribuția priorităților (suma ≈ 1.0)</p>
+        <div class="weight-group" id="priority-weights">
+          <div class="weight-row">
+            <label>Low</label>
+            <input type="range" min="0" max="100" value="50" data-key="low" oninput="updateLinkedWeights('priority-weights')">
+            <span class="w-val">0.50</span>
+          </div>
+          <div class="weight-row">
+            <label>Medium</label>
+            <input type="range" min="0" max="100" value="30" data-key="medium" oninput="updateLinkedWeights('priority-weights')">
+            <span class="w-val">0.30</span>
+          </div>
+          <div class="weight-row">
+            <label>High</label>
+            <input type="range" min="0" max="100" value="20" data-key="high" oninput="updateLinkedWeights('priority-weights')">
+            <span class="w-val">0.20</span>
+          </div>
+        </div>
+        <div class="weight-sum" id="priority-sum">Suma: 1.00</div>
+      </div>
+      <div>
+        <p style="font-size:.82rem;color:var(--text2);margin-bottom:8px">Distribuția QoS (suma ≈ 1.0)</p>
+        <div class="weight-group" id="qos-weights">
+          <div class="weight-row">
+            <label>BestEffort</label>
+            <input type="range" min="0" max="100" value="40" data-key="best_effort" oninput="updateLinkedWeights('qos-weights')">
+            <span class="w-val">0.40</span>
+          </div>
+          <div class="weight-row">
+            <label>Burstable</label>
+            <input type="range" min="0" max="100" value="40" data-key="burstable" oninput="updateLinkedWeights('qos-weights')">
+            <span class="w-val">0.40</span>
+          </div>
+          <div class="weight-row">
+            <label>Guaranteed</label>
+            <input type="range" min="0" max="100" value="20" data-key="guaranteed" oninput="updateLinkedWeights('qos-weights')">
+            <span class="w-val">0.20</span>
+          </div>
+        </div>
+        <div class="weight-sum" id="qos-sum">Suma: 1.00</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Workload Profile</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Profil <span class="tooltip-icon" data-tip="Selectează un arhetip de workload K8s. Fiecare profil pre-configurează distribuția CPU, MEM, durată și QoS. „Mixed" combină toate cele 5 profile.">?</span></label>
+        <select id="cfg-profile" onchange="updateProfileUI()">
+          <option value="" selected>Generic (fără profil)</option>
+          <option value="web_serving">🌐 Web Serving</option>
+          <option value="ai_training">🧠 AI Training</option>
+          <option value="ci_cd">🔄 CI/CD</option>
+          <option value="batch_processing">📊 Batch Processing</option>
+          <option value="microservices">🔗 Microservices</option>
+          <option value="mixed">🎲 Mixed (blend ponderat)</option>
+        </select>
+      </div>
+    </div>
+    <div id="profile-info" class="conditional hidden" style="font-size:.82rem;color:var(--text2);padding:8px 0"></div>
+    <div id="profile-mix-section" class="conditional hidden">
+      <p style="font-size:.82rem;color:var(--text2);margin-bottom:8px">Mix de profile (suma ≈ 1.0)</p>
+      <div class="weight-group" id="profile-mix-weights">
+        <div class="weight-row"><label>Web Serving</label><input type="range" min="0" max="100" value="30" data-key="web_serving" oninput="updateLinkedWeights('profile-mix-weights')"><span class="w-val">0.30</span></div>
+        <div class="weight-row"><label>AI Training</label><input type="range" min="0" max="100" value="10" data-key="ai_training" oninput="updateLinkedWeights('profile-mix-weights')"><span class="w-val">0.10</span></div>
+        <div class="weight-row"><label>CI/CD</label><input type="range" min="0" max="100" value="15" data-key="ci_cd" oninput="updateLinkedWeights('profile-mix-weights')"><span class="w-val">0.15</span></div>
+        <div class="weight-row"><label>Batch</label><input type="range" min="0" max="100" value="20" data-key="batch_processing" oninput="updateLinkedWeights('profile-mix-weights')"><span class="w-val">0.20</span></div>
+        <div class="weight-row"><label>Microservices</label><input type="range" min="0" max="100" value="25" data-key="microservices" oninput="updateLinkedWeights('profile-mix-weights')"><span class="w-val">0.25</span></div>
+      </div>
+      <div class="weight-sum" id="profile-mix-sum">Suma: 1.00</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Constrângeri Avansate</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Possible taints <span class="tooltip-icon" data-tip="Taints K8s disponibile pe noduri. Pod-urile trebuie să le tolereze explicit pentru a fi programate pe aceste noduri.">?</span></label>
+        <textarea id="cfg-taints" rows="2" style="font-size:.82rem">gpu
+spot
+dedicated</textarea>
+      </div>
+      <div class="field">
+        <label>Taint toleration prob <span class="tooltip-icon" data-tip="Probabilitatea ca un pod generat să tolereze fiecare taint. 0.3 = 30% din pod-uri tolerează fiecare taint.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-taint-prob" min="0" max="1" step="0.01" value="0.3">
+          <span class="slider-val" id="val-taint-prob">0.30</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Node selector prob <span class="tooltip-icon" data-tip="Probabilitatea ca un pod să ceară un anumit label pe nod (nodeSelector). Crește dificultatea scheduling-ului.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-selector-prob" min="0" max="1" step="0.01" value="0.2">
+          <span class="slider-val" id="val-selector-prob">0.20</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Limit probability <span class="tooltip-icon" data-tip="Probabilitatea ca un pod să aibă resource limits > requests (overcommit). 0.5 = jumătate din pod-uri.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-limit-prob" min="0" max="1" step="0.01" value="0.5">
+          <span class="slider-val" id="val-limit-prob">0.50</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Limit ratio range <span class="tooltip-icon" data-tip="Multiplicatorul limits/requests. [1.0, 2.0] = limits între 100% și 200% din request. Min ≥ 1.0.">?</span></label>
+        <div class="range-pair">
+          <input type="number" id="cfg-limit-ratio-min" value="1.0" min="1" step="0.1">
+          <span class="range-sep">–</span>
+          <input type="number" id="cfg-limit-ratio-max" value="2.0" min="1" step="0.1">
+        </div>
+      </div>
+      <div class="field">
+        <label>Anti-affinity prob <span class="tooltip-icon" data-tip="Probabilitatea ca un pod să evite co-locarea cu pod-uri ce au aceeași cheie anti-affinity (spread scheduling).">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-aa-prob" min="0" max="1" step="0.01" value="0.3">
+          <span class="slider-val" id="val-aa-prob">0.30</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Anti-affinity keys <span class="tooltip-icon" data-tip="Cheile anti-affinity posibile. Pod-urile cu aceeași cheie vor fi distribuite pe noduri diferite. Câte una pe linie.">?</span></label>
+        <textarea id="cfg-aa-keys" rows="2" style="font-size:.82rem">app-web
+app-api
+app-worker</textarea>
+      </div>
+      <div class="field">
+        <label>Possible labels <span class="tooltip-icon" data-tip="Label-uri disponibile pe noduri. Format: cheie: val1, val2. Pod-urile cu nodeSelector aleg din acestea.">?</span></label>
+        <textarea id="cfg-labels" rows="2" style="font-size:.82rem">disktype: ssd, hdd
+zone: zone-a, zone-b</textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: GP Engine
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-gp" class="tab-panel">
+  <div class="card">
+    <h3>Motor GP</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Engine <span class="tooltip-icon" data-tip="DEAP: evaluează fiecare individ prin simulare completă (robust, lent). gplearn: regresie simbolică pe date colectate (rapid, aproximativ).">?</span></label>
+        <select id="cfg-engine">
+          <option value="deap" selected>DEAP (simulation-based)</option>
+          <option value="gplearn">gplearn (regression-based)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Population size <span class="tooltip-icon" data-tip="Nr. indivizi (arbori GP) per generație. Mai mare = diversitate mai bună dar crește timpul. Recomandat: 50–300. Interval: 5–1000.">?</span></label>
+        <input type="number" id="cfg-pop-size" value="150" min="5" max="1000">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Generații <span class="tooltip-icon" data-tip="Câte generații evolutive rulează algoritmul. Mai multe = convergență mai bună. Recomandat: 20–100. Interval: 1–500.">?</span></label>
+        <input type="number" id="cfg-generations" value="50" min="1" max="500">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Tournament size <span class="tooltip-icon" data-tip="Nr. indivizi comparați la fiecare selecție. Mic (2–3) = diversitate. Mare (5–7) = convergență rapidă. Trebuie ≤ pop_size.">?</span></label>
+        <input type="number" id="cfg-tournament" value="3" min="2" max="20">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Max tree depth <span class="tooltip-icon" data-tip="Adâncimea maximă permisă a arborelui GP. Controlează complexitatea regulii. Recomandat: 6–12. Interval: 2–20.">?</span></label>
+        <input type="number" id="cfg-max-depth" value="10" min="2" max="20">
+        <div class="error-msg"></div>
+      </div>
+      <div class="field">
+        <label>Parsimony coefficient <span class="tooltip-icon" data-tip="Penalizare proporțională cu dimensiunea arborelui (bloat control). 0 = dezactivat, 0.001 = ușor. Valori mari favorizează arbori mici.">?</span></label>
+        <input type="number" id="cfg-parsimony" value="0.001" min="0" step="0.0001">
+      </div>
+    </div>
+    <div class="field-group">
+      <div class="field">
+        <label>Crossover probability <span class="tooltip-icon" data-tip="Probabilitatea de a combina sub-arbori din doi părinți. Valoare standard: 0.7–0.9. Crossover + mutație = explorare.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-cx-prob" min="0" max="1" step="0.01" value="0.8">
+          <span class="slider-val" id="val-cx-prob">0.80</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Mutation probability <span class="tooltip-icon" data-tip="Probabilitatea de a modifica aleator un sub-arbore. Valoare standard: 0.1–0.3. Previne convergența prematură.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-mut-prob" min="0" max="1" step="0.01" value="0.2">
+          <span class="slider-val" id="val-mut-prob">0.20</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Elitism ratio <span class="tooltip-icon" data-tip="Fracțiunea celor mai buni indivizi copiați direct la generația următoare (fără crossover/mutație). 0.05 = top 5%.">?</span></label>
+        <div class="slider-row">
+          <input type="range" id="cfg-elitism" min="0" max="0.3" step="0.01" value="0.05">
+          <span class="slider-val" id="val-elitism">0.05</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="estimate-box" id="gp-estimate">
+      <strong>Estimare complexitate:</strong> <span id="estimate-text">—</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: Fitness
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-fitness" class="tab-panel">
+  <div class="card">
+    <h3>Ponderi Fitness — α·W + β·R + γ·F</h3>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:12px">
+      Funcția de fitness ce se minimizează. Suma ponderilor trebuie să fie ≈ 1.0. Slider-ele se ajustează automat.
+    </p>
+
+    <div class="weight-group" id="fitness-weights">
+      <div class="weight-row">
+        <label>α Wait Time</label>
+        <input type="range" min="0" max="100" value="40" data-key="alpha" oninput="updateFitnessWeights()">
+        <span class="w-val">0.40</span>
+      </div>
+      <div class="weight-row">
+        <label>β Resource Waste</label>
+        <input type="range" min="0" max="100" value="30" data-key="beta" oninput="updateFitnessWeights()">
+        <span class="w-val">0.30</span>
+      </div>
+      <div class="weight-row">
+        <label>γ Failed Pods</label>
+        <input type="range" min="0" max="100" value="30" data-key="gamma" oninput="updateFitnessWeights()">
+        <span class="w-val">0.30</span>
+      </div>
+    </div>
+    <div class="weight-sum valid" id="fitness-sum">Suma: 1.00 ✓</div>
+
+    <div class="fitness-vis">
+      <canvas id="fitness-canvas" width="120" height="120"></canvas>
+      <div class="fitness-legend">
+        <div><span class="dot" style="background:#3b82f6"></span> α Wait Time: <strong id="legend-alpha">0.40</strong></div>
+        <div><span class="dot" style="background:#f59e0b"></span> β Resource Waste: <strong id="legend-beta">0.30</strong></div>
+        <div><span class="dot" style="background:#ef4444"></span> γ Failed Pods: <strong id="legend-gamma">0.30</strong></div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <p style="font-size:.82rem;color:var(--text2);margin-bottom:8px">Preseturi rapide:</p>
+      <div class="btn-group">
+        <button class="btn btn-sm" onclick="setFitnessPreset(0.4, 0.3, 0.3)">⚖️ Balanced</button>
+        <button class="btn btn-sm" onclick="setFitnessPreset(0.7, 0.15, 0.15)">⏱️ Wait Focused</button>
+        <button class="btn btn-sm" onclick="setFitnessPreset(0.15, 0.7, 0.15)">📊 Resource Focused</button>
+        <button class="btn btn-sm" onclick="setFitnessPreset(0.15, 0.15, 0.7)">🛡️ Reliability Focused</button>
+        <button class="btn btn-sm" onclick="setFitnessPreset(0.33, 0.34, 0.33)">➗ Equal</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: Dynamics
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-dynamics" class="tab-panel">
+  <div class="card">
+    <h3>Node Failures & Dynamics</h3>
+    <div class="field-group">
+      <div class="field">
+        <label>Failure mode <span class="tooltip-icon" data-tip="Off: niciun nod nu cade. Reschedule: nodurile cad, pod-urile evictate sunt reprogramate pe alt nod. Kill: pod-urile pierdute nu mai revin.">?</span></label>
+        <select id="cfg-failure-mode" onchange="updateDynamicsUI()">
+          <option value="off" selected>Off (cluster stabil)</option>
+          <option value="reschedule">Reschedule (pod-uri re-programate)</option>
+          <option value="kill">Kill (pod-uri pierdute)</option>
+        </select>
+      </div>
+    </div>
+    <div id="dynamics-params" class="conditional hidden">
+      <div class="field-group">
+        <div class="field">
+          <label>Failure rate <span class="tooltip-icon" data-tip="Severitatea failure-urilor: nivelul 1 = 10% din noduri, 2 = 20%, 3 = 30%. Niveluri mai mari = test de reziliență mai dur.">?</span></label>
+          <select id="cfg-failure-rate">
+            <option value="1" selected>1 — 10% din noduri</option>
+            <option value="2">2 — 20% din noduri</option>
+            <option value="3">3 — 30% din noduri</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Recovery time range (s) <span class="tooltip-icon" data-tip="Durata cât un nod rămâne offline (secunde). Valoare aleasă uniform din interval. Ex: [10, 30] → între 10s și 30s.">?</span></label>
+          <div class="range-pair">
+            <input type="number" id="cfg-rec-min" value="10" min="0" step="1">
+            <span class="range-sep">–</span>
+            <input type="number" id="cfg-rec-max" value="30" min="0" step="1">
+          </div>
+          <div class="error-msg" id="err-rec-range"></div>
+        </div>
+        <div class="field">
+          <label>Restart overhead range (s) <span class="tooltip-icon" data-tip="Overhead suplimentar la reprogramare (image pull, init containers). Se adaugă la duration-ul original al pod-ului.">?</span></label>
+          <div class="range-pair">
+            <input type="number" id="cfg-restart-min" value="2" min="0" step="0.5">
+            <span class="range-sep">–</span>
+            <input type="number" id="cfg-restart-max" value="8" min="0" step="0.5">
+          </div>
+          <div class="error-msg" id="err-restart-range"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     TAB: YAML Output
+     ═══════════════════════════════════════════════════════════════════ -->
+<div id="tab-output" class="tab-panel">
+  <div class="card">
+    <h3>Configurație YAML Generată</h3>
+    <div class="btn-group" style="margin-bottom:12px">
+      <button class="btn btn-primary" onclick="copyYaml()">📋 Copy to Clipboard</button>
+      <button class="btn" onclick="downloadYaml()">💾 Download YAML</button>
+    </div>
+    <pre class="yaml-output" id="yaml-output">Loading...</pre>
+  </div>
+</div>
+
+</div><!-- container -->
+
+<!-- Status bar -->
+<div class="status-bar">
+  <span class="status-text valid" id="status-text">✓ Configurație validă</span>
+  <div class="status-actions">
+    <button class="btn btn-sm btn-primary" onclick="switchTab('output')">Generează YAML</button>
+  </div>
+</div>
+
+<!-- Import modal -->
+<div class="modal-overlay" id="import-modal">
+  <div class="modal">
+    <h3>📥 Import YAML</h3>
+    <p style="font-size:.82rem;color:var(--text2);margin-bottom:8px">Lipește configurația YAML existentă:</p>
+    <textarea id="import-textarea" placeholder="# Lipește YAML aici..."></textarea>
+    <div class="btn-group">
+      <button class="btn" onclick="hideImportModal()">Anulează</button>
+      <button class="btn btn-primary" onclick="importYaml()">Import</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">Copiat!</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════════════════ -->
+<script>
+/* ── State ──────────────────────────────────────────────────────────── */
+let nodeTemplates = [
+  { count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0, taints: '', labels: '' }
+];
+let validationErrors = [];
+
+/* ── Theme ──────────────────────────────────────────────────────────── */
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  document.querySelector('.theme-toggle').textContent = next === 'dark' ? '☀️ Temă' : '🌙 Temă';
+  localStorage.setItem('theme', next);
+}
+(function initTheme() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.querySelector('.theme-toggle').textContent = '☀️ Temă';
+  }
+})();
+
+/* ── Tabs ───────────────────────────────────────────────────────────── */
+function switchTab(id) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + id));
+  if (id === 'output') generateYaml();
+}
+
+/* ── Sliders with live display ──────────────────────────────────────── */
+function setupSlider(inputId, displayId) {
+  const inp = document.getElementById(inputId);
+  const disp = document.getElementById(displayId);
+  if (!inp || !disp) return;
+  inp.addEventListener('input', () => {
+    disp.textContent = parseFloat(inp.value).toFixed(2);
+    validateAll();
+  });
+}
+setupSlider('cfg-burst-prob', 'val-burst-prob');
+setupSlider('cfg-bursty-prob', 'val-bursty-prob');
+setupSlider('cfg-taint-prob', 'val-taint-prob');
+setupSlider('cfg-selector-prob', 'val-selector-prob');
+setupSlider('cfg-limit-prob', 'val-limit-prob');
+setupSlider('cfg-aa-prob', 'val-aa-prob');
+setupSlider('cfg-cx-prob', 'val-cx-prob');
+setupSlider('cfg-mut-prob', 'val-mut-prob');
+setupSlider('cfg-elitism', 'val-elitism');
+
+/* ── Weight groups ──────────────────────────────────────────────────── */
+function updateLinkedWeights(groupId) {
+  const group = document.getElementById(groupId);
+  const rows = group.querySelectorAll('.weight-row');
+  let total = 0;
+  rows.forEach(row => {
+    const val = parseInt(row.querySelector('input[type="range"]').value) / 100;
+    row.querySelector('.w-val').textContent = val.toFixed(2);
+    total += val;
+  });
+  const sumEl = document.getElementById(groupId.replace('weights', 'sum').replace('profile-mix-weights', 'profile-mix-sum'));
+  if (sumEl) {
+    sumEl.textContent = 'Suma: ' + total.toFixed(2);
+    sumEl.className = 'weight-sum ' + (Math.abs(total - 1.0) <= 0.05 ? 'valid' : 'invalid');
+  }
+  validateAll();
+}
+
+function getWeights(groupId) {
+  const group = document.getElementById(groupId);
+  const weights = {};
+  group.querySelectorAll('.weight-row').forEach(row => {
+    const key = row.querySelector('input[type="range"]').dataset.key;
+    const val = parseInt(row.querySelector('input[type="range"]').value) / 100;
+    weights[key] = parseFloat(val.toFixed(2));
+  });
+  return weights;
+}
+
+function setWeights(groupId, weights) {
+  const group = document.getElementById(groupId);
+  group.querySelectorAll('.weight-row').forEach(row => {
+    const key = row.querySelector('input[type="range"]').dataset.key;
+    if (weights[key] !== undefined) {
+      row.querySelector('input[type="range"]').value = Math.round(weights[key] * 100);
+      row.querySelector('.w-val').textContent = weights[key].toFixed(2);
+    }
+  });
+  updateLinkedWeights(groupId);
+}
+
+/* ── Fitness weights with pie chart ─────────────────────────────────── */
+function updateFitnessWeights() {
+  const group = document.getElementById('fitness-weights');
+  const rows = group.querySelectorAll('.weight-row');
+  let total = 0;
+  const vals = {};
+  rows.forEach(row => {
+    const key = row.querySelector('input[type="range"]').dataset.key;
+    const val = parseInt(row.querySelector('input[type="range"]').value) / 100;
+    row.querySelector('.w-val').textContent = val.toFixed(2);
+    vals[key] = val;
+    total += val;
+  });
+  const sumEl = document.getElementById('fitness-sum');
+  const ok = Math.abs(total - 1.0) <= 0.01;
+  sumEl.textContent = 'Suma: ' + total.toFixed(2) + (ok ? ' ✓' : ' ✗');
+  sumEl.className = 'weight-sum ' + (ok ? 'valid' : 'invalid');
+
+  document.getElementById('legend-alpha').textContent = vals.alpha.toFixed(2);
+  document.getElementById('legend-beta').textContent = vals.beta.toFixed(2);
+  document.getElementById('legend-gamma').textContent = vals.gamma.toFixed(2);
+
+  drawPie(vals.alpha, vals.beta, vals.gamma);
+  validateAll();
+}
+
+function drawPie(a, b, g) {
+  const canvas = document.getElementById('fitness-canvas');
+  const ctx = canvas.getContext('2d');
+  const cx = 60, cy = 60, r = 55;
+  ctx.clearRect(0, 0, 120, 120);
+
+  const total = a + b + g;
+  if (total === 0) return;
+  const slices = [
+    { v: a / total, c: '#3b82f6' },
+    { v: b / total, c: '#f59e0b' },
+    { v: g / total, c: '#ef4444' },
+  ];
+  let start = -Math.PI / 2;
+  slices.forEach(s => {
+    const end = start + s.v * 2 * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, end);
+    ctx.fillStyle = s.c;
+    ctx.fill();
+    start = end;
+  });
+  // white center
+  ctx.beginPath();
+  ctx.arc(cx, cy, 28, 0, 2 * Math.PI);
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#fff';
+  ctx.fill();
+}
+
+function setFitnessPreset(a, b, g) {
+  setWeights('fitness-weights', { alpha: a, beta: b, gamma: g });
+  updateFitnessWeights();
+}
+
+/* ── Node templates ─────────────────────────────────────────────────── */
+function renderNodeTable() {
+  const tbody = document.getElementById('node-tbody');
+  tbody.innerHTML = '';
+  nodeTemplates.forEach((nt, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="number" value="${nt.count}" min="1" onchange="nodeTemplates[${i}].count=parseInt(this.value)||1;validateAll()"></td>
+      <td><input type="number" value="${nt.cpu_capacity}" min="0.1" step="0.5" onchange="nodeTemplates[${i}].cpu_capacity=parseFloat(this.value)||1;validateAll()"></td>
+      <td><input type="number" value="${nt.mem_capacity}" min="1" step="512" onchange="nodeTemplates[${i}].mem_capacity=parseFloat(this.value)||1024;validateAll()"></td>
+      <td><input type="number" value="${nt.cost_per_hour}" min="0" step="0.1" onchange="nodeTemplates[${i}].cost_per_hour=parseFloat(this.value)||0;validateAll()"></td>
+      <td><input type="text" value="${nt.taints}" placeholder="gpu, spot" onchange="nodeTemplates[${i}].taints=this.value;validateAll()"></td>
+      <td><input type="text" value="${nt.labels}" placeholder="disktype: ssd" onchange="nodeTemplates[${i}].labels=this.value;validateAll()"></td>
+      <td>${nodeTemplates.length > 1 ? '<button class="del-btn" onclick="removeNodeTemplate(' + i + ')" title="Șterge">✕</button>' : ''}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function addNodeTemplate() {
+  nodeTemplates.push({ count: 3, cpu_capacity: 4.0, mem_capacity: 8192.0, cost_per_hour: 0.5, taints: '', labels: '' });
+  renderNodeTable();
+  validateAll();
+}
+
+function removeNodeTemplate(i) {
+  if (nodeTemplates.length <= 1) return;
+  nodeTemplates.splice(i, 1);
+  renderNodeTable();
+  validateAll();
+}
+
+/* ── Conditional UI ─────────────────────────────────────────────────── */
+function updateArrivalUI() {
+  const pattern = document.getElementById('cfg-arrival-pattern').value;
+  document.getElementById('diurnal-params').classList.toggle('hidden', pattern !== 'diurnal');
+  document.getElementById('bursty-params').classList.toggle('hidden', pattern !== 'bursty');
+}
+
+function updateDynamicsUI() {
+  const mode = document.getElementById('cfg-failure-mode').value;
+  document.getElementById('dynamics-params').classList.toggle('hidden', mode === 'off');
+}
+
+function updateProfileUI() {
+  const profile = document.getElementById('cfg-profile').value;
+  const info = document.getElementById('profile-info');
+  const mixSection = document.getElementById('profile-mix-section');
+
+  mixSection.classList.toggle('hidden', profile !== 'mixed');
+
+  const descriptions = {
+    web_serving: '🌐 Web Serving: CPU 0.1–1.0, MEM 128–1024 MiB, durată 20–60s, arrival diurnal, anti-affinity 70%, Guaranteed 50%',
+    ai_training: '🧠 AI Training: CPU 2.0–6.0, MEM 4096–16384 MiB, durată 40–120s, arrival bursty, BestEffort 50%, tolerează GPU',
+    ci_cd: '🔄 CI/CD: CPU 0.5–2.0, MEM 512–4096 MiB, durată 2–15s, arrival bursty, BestEffort 60%',
+    batch_processing: '📊 Batch: CPU 1.0–4.0, MEM 2048–8192 MiB, durată 25–80s, arrival constant, Burstable 50%',
+    microservices: '🔗 Microservices: CPU 0.1–1.5, MEM 256–2048 MiB, durată 15–50s, arrival diurnal, anti-affinity 60%',
+    mixed: '🎲 Mixed: generează pod-uri din toate 5 profilele, ponderat conform mix-ului de mai jos',
+  };
+  if (profile && descriptions[profile]) {
+    info.textContent = descriptions[profile];
+    info.classList.remove('hidden');
+  } else {
+    info.classList.add('hidden');
+  }
+}
+
+/* ── Validation ─────────────────────────────────────────────────────── */
+function validateAll() {
+  validationErrors = [];
+
+  // Helper: validate and show error
+  function v(id, condition, msg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const errEl = el.closest('.field')?.querySelector('.error-msg');
+    if (condition) {
+      el.classList.remove('invalid');
+      if (errEl) errEl.textContent = '';
+    } else {
+      el.classList.add('invalid');
+      if (errEl) errEl.textContent = msg;
+      validationErrors.push(msg);
+    }
+  }
+
+  // General
+  v('cfg-name', document.getElementById('cfg-name').value.trim().length > 0, 'Numele nu poate fi gol');
+  v('cfg-seed', parseInt(document.getElementById('cfg-seed').value) >= 0, 'Seed trebuie ≥ 0');
+  v('cfg-train-instances', parseInt(document.getElementById('cfg-train-instances').value) >= 1, 'Trebuie ≥ 1');
+  v('cfg-test-instances', parseInt(document.getElementById('cfg-test-instances').value) >= 1, 'Trebuie ≥ 1');
+
+  // Workload
+  v('cfg-total-pods', parseInt(document.getElementById('cfg-total-pods').value) >= 1, 'Trebuie ≥ 1');
+  v('cfg-arrival-rate', parseFloat(document.getElementById('cfg-arrival-rate').value) > 0, 'Trebuie > 0');
+
+  // Ranges
+  const cpuMin = parseFloat(document.getElementById('cfg-cpu-min').value);
+  const cpuMax = parseFloat(document.getElementById('cfg-cpu-max').value);
+  const rangeOk = cpuMin >= 0 && cpuMin <= cpuMax;
+  const errCpu = document.getElementById('err-cpu-range');
+  if (errCpu) { errCpu.textContent = rangeOk ? '' : 'min ≤ max, ambele ≥ 0'; if (!rangeOk) validationErrors.push('CPU range invalid'); }
+
+  const memMin = parseFloat(document.getElementById('cfg-mem-min').value);
+  const memMax = parseFloat(document.getElementById('cfg-mem-max').value);
+  const memOk = memMin >= 0 && memMin <= memMax;
+  const errMem = document.getElementById('err-mem-range');
+  if (errMem) { errMem.textContent = memOk ? '' : 'min ≤ max, ambele ≥ 0'; if (!memOk) validationErrors.push('MEM range invalid'); }
+
+  const durMin = parseFloat(document.getElementById('cfg-dur-min').value);
+  const durMax = parseFloat(document.getElementById('cfg-dur-max').value);
+  const durOk = durMin >= 0 && durMin <= durMax;
+  const errDur = document.getElementById('err-dur-range');
+  if (errDur) { errDur.textContent = durOk ? '' : 'min ≤ max, ambele ≥ 0'; if (!durOk) validationErrors.push('Duration range invalid'); }
+
+  // Burst
+  const bMin = parseInt(document.getElementById('cfg-burst-min').value);
+  const bMax = parseInt(document.getElementById('cfg-burst-max').value);
+  v('cfg-burst-min', bMin >= 1, 'Trebuie ≥ 1');
+  v('cfg-burst-max', bMax >= 1 && bMax >= bMin, 'Trebuie ≥ burst_min');
+
+  // GP
+  const pop = parseInt(document.getElementById('cfg-pop-size').value);
+  const tourn = parseInt(document.getElementById('cfg-tournament').value);
+  v('cfg-pop-size', pop >= 5, 'Trebuie ≥ 5');
+  v('cfg-generations', parseInt(document.getElementById('cfg-generations').value) >= 1, 'Trebuie ≥ 1');
+  v('cfg-tournament', tourn >= 2 && tourn <= pop, 'Trebuie 2 ≤ t ≤ pop_size');
+  v('cfg-max-depth', parseInt(document.getElementById('cfg-max-depth').value) >= 2, 'Trebuie ≥ 2');
+
+  // Fitness weights sum
+  const fw = getWeights('fitness-weights');
+  const fTotal = (fw.alpha || 0) + (fw.beta || 0) + (fw.gamma || 0);
+  if (Math.abs(fTotal - 1.0) > 0.01) validationErrors.push('Fitness weights sum ≠ 1.0');
+
+  // Priority/QoS weights
+  const pw = getWeights('priority-weights');
+  const pTotal = Object.values(pw).reduce((a, b) => a + b, 0);
+  if (Math.abs(pTotal - 1.0) > 0.05) validationErrors.push('Priority weights sum ≠ 1.0');
+
+  const qw = getWeights('qos-weights');
+  const qTotal = Object.values(qw).reduce((a, b) => a + b, 0);
+  if (Math.abs(qTotal - 1.0) > 0.05) validationErrors.push('QoS weights sum ≠ 1.0');
+
+  // Dynamics ranges
+  if (document.getElementById('cfg-failure-mode').value !== 'off') {
+    const recMin = parseFloat(document.getElementById('cfg-rec-min').value);
+    const recMax = parseFloat(document.getElementById('cfg-rec-max').value);
+    const recOk = recMin >= 0 && recMin <= recMax;
+    const errRec = document.getElementById('err-rec-range');
+    if (errRec) { errRec.textContent = recOk ? '' : 'min ≤ max'; if (!recOk) validationErrors.push('Recovery range invalid'); }
+
+    const restMin = parseFloat(document.getElementById('cfg-restart-min').value);
+    const restMax = parseFloat(document.getElementById('cfg-restart-max').value);
+    const restOk = restMin >= 0 && restMin <= restMax;
+    const errRest = document.getElementById('err-restart-range');
+    if (errRest) { errRest.textContent = restOk ? '' : 'min ≤ max'; if (!restOk) validationErrors.push('Restart overhead range invalid'); }
+  }
+
+  // Update status bar
+  const statusEl = document.getElementById('status-text');
+  if (validationErrors.length === 0) {
+    statusEl.textContent = '✓ Configurație validă';
+    statusEl.className = 'status-text valid';
+  } else {
+    statusEl.textContent = '✗ ' + validationErrors.length + ' erori: ' + validationErrors[0];
+    statusEl.className = 'status-text invalid';
+  }
+
+  // Update estimate
+  updateEstimate();
+}
+
+/* ── Complexity estimate ────────────────────────────────────────────── */
+function updateEstimate() {
+  const pods = parseInt(document.getElementById('cfg-total-pods').value) || 100;
+  const train = parseInt(document.getElementById('cfg-train-instances').value) || 5;
+  const pop = parseInt(document.getElementById('cfg-pop-size').value) || 150;
+  const gen = parseInt(document.getElementById('cfg-generations').value) || 50;
+  const engine = document.getElementById('cfg-engine').value;
+
+  const totalNodes = nodeTemplates.reduce((s, nt) => s + (nt.count || 1), 0);
+  const evals = pop * gen * train;
+
+  let desc;
+  if (engine === 'deap') {
+    desc = `DEAP: ${pop} indivizi × ${gen} generații × ${train} instanțe = <strong>${evals.toLocaleString()}</strong> simulări. `;
+    desc += `Cluster: ${totalNodes} noduri, ${pods} pods/instanță. `;
+    if (evals < 5000) desc += '⚡ Rapid (< 2 min)';
+    else if (evals < 30000) desc += '⏱️ Moderat (2–10 min)';
+    else desc += '🐢 Lent (> 10 min)';
+  } else {
+    desc = `gplearn: colectare date din ${train} instanțe + regresie simbolică (${pop} pop × ${gen} gen). `;
+    desc += `Cluster: ${totalNodes} noduri, ${pods} pods/instanță. `;
+    desc += '⚡ Rapid (colectare + fit vectorizat)';
+  }
+  document.getElementById('estimate-text').innerHTML = desc;
+}
+
+/* ── Parse helpers ──────────────────────────────────────────────────── */
+function parseList(textareaId) {
+  return document.getElementById(textareaId).value
+    .split('\n').map(s => s.trim()).filter(s => s.length > 0);
+}
+
+function parseLabelsText(text) {
+  const result = {};
+  text.split('\n').forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    const [key, ...rest] = line.split(':');
+    if (!key || rest.length === 0) return;
+    result[key.trim()] = rest.join(':').split(',').map(s => s.trim()).filter(s => s);
+  });
+  return result;
+}
+
+function parseNodeTaints(taintsStr) {
+  if (!taintsStr || !taintsStr.trim()) return [];
+  return taintsStr.split(',').map(s => s.trim()).filter(s => s);
+}
+
+function parseNodeLabels(labelsStr) {
+  if (!labelsStr || !labelsStr.trim()) return {};
+  const result = {};
+  labelsStr.split(',').forEach(pair => {
+    const [k, ...v] = pair.split(':');
+    if (k && v.length > 0) result[k.trim()] = v.join(':').trim();
+  });
+  return result;
+}
+
+/* ── YAML generation ────────────────────────────────────────────────── */
+function generateYaml() {
+  const lines = [];
+  const L = (s) => lines.push(s);
+
+  L('# ──────────────────────────────────────────────────────────────────────────');
+  L('# K8s GP Scheduler — Generated Configuration');
+  L('# Generated: ' + new Date().toISOString().slice(0, 19).replace('T', ' '));
+  L('# ──────────────────────────────────────────────────────────────────────────');
+  L('');
+  L('name: "' + (document.getElementById('cfg-name').value || 'experiment') + '"');
+  L('seed: ' + (parseInt(document.getElementById('cfg-seed').value) || 42));
+  L('num_training_instances: ' + (parseInt(document.getElementById('cfg-train-instances').value) || 5));
+  L('num_test_instances: ' + (parseInt(document.getElementById('cfg-test-instances').value) || 5));
+  L('dynamic_instances: ' + (document.getElementById('cfg-dynamic-instances').value === 'true'));
+  L('output_dir: "' + (document.getElementById('cfg-output-dir').value || 'tmp/results') + '"');
+  L('output_format: "' + (document.getElementById('cfg-output-format').value || 'csv') + '"');
+
+  // Cluster
+  L('');
+  L('# ── Cluster ──────────────────────────────────────────────────────────────');
+  L('cluster:');
+  L('  node_templates:');
+  nodeTemplates.forEach(nt => {
+    L('    - count: ' + (nt.count || 1));
+    L('      cpu_capacity: ' + (nt.cpu_capacity || 4.0));
+    L('      mem_capacity: ' + (nt.mem_capacity || 8192.0));
+    L('      cost_per_hour: ' + (nt.cost_per_hour || 0));
+    const taints = parseNodeTaints(nt.taints);
+    if (taints.length > 0) {
+      L('      taints: [' + taints.map(t => '"' + t + '"').join(', ') + ']');
+    }
+    const labels = parseNodeLabels(nt.labels);
+    const labelKeys = Object.keys(labels);
+    if (labelKeys.length > 0) {
+      L('      labels:');
+      labelKeys.forEach(k => L('        ' + k + ': "' + labels[k] + '"'));
+    }
+  });
+
+  // Workload
+  L('');
+  L('# ── Workload ─────────────────────────────────────────────────────────────');
+  L('workload:');
+  L('  total_pods: ' + (parseInt(document.getElementById('cfg-total-pods').value) || 100));
+  L('  arrival_rate: ' + (parseFloat(document.getElementById('cfg-arrival-rate').value) || 1.0));
+  L('  burst_probability: ' + (parseFloat(document.getElementById('cfg-burst-prob').value) || 0.1));
+  L('  burst_size_min: ' + (parseInt(document.getElementById('cfg-burst-min').value) || 3));
+  L('  burst_size_max: ' + (parseInt(document.getElementById('cfg-burst-max').value) || 8));
+  L('  cpu_range: [' + (parseFloat(document.getElementById('cfg-cpu-min').value) || 0.1) + ', ' + (parseFloat(document.getElementById('cfg-cpu-max').value) || 2.0) + ']');
+  L('  mem_range: [' + (parseFloat(document.getElementById('cfg-mem-min').value) || 128) + ', ' + (parseFloat(document.getElementById('cfg-mem-max').value) || 4096) + ']');
+  L('  duration_range: [' + (parseFloat(document.getElementById('cfg-dur-min').value) || 5) + ', ' + (parseFloat(document.getElementById('cfg-dur-max').value) || 50) + ']');
+
+  const pw = getWeights('priority-weights');
+  L('  priority_weights:');
+  L('    low: ' + (pw.low || 0));
+  L('    medium: ' + (pw.medium || 0));
+  L('    high: ' + (pw.high || 0));
+
+  const qw = getWeights('qos-weights');
+  L('  qos_weights:');
+  L('    best_effort: ' + (qw.best_effort || 0));
+  L('    burstable: ' + (qw.burstable || 0));
+  L('    guaranteed: ' + (qw.guaranteed || 0));
+
+  const ns = parseList('cfg-namespaces');
+  L('  namespaces: [' + ns.map(n => '"' + n + '"').join(', ') + ']');
+
+  const taints = parseList('cfg-taints');
+  L('  possible_taints: [' + taints.map(t => '"' + t + '"').join(', ') + ']');
+  L('  taint_toleration_probability: ' + parseFloat(document.getElementById('cfg-taint-prob').value));
+
+  const labelsObj = parseLabelsText(document.getElementById('cfg-labels').value);
+  L('  possible_labels:');
+  Object.keys(labelsObj).forEach(k => {
+    L('    ' + k + ': [' + labelsObj[k].map(v => '"' + v + '"').join(', ') + ']');
+  });
+  L('  node_selector_probability: ' + parseFloat(document.getElementById('cfg-selector-prob').value));
+
+  L('  limit_ratio_min: ' + (parseFloat(document.getElementById('cfg-limit-ratio-min').value) || 1.0));
+  L('  limit_ratio_max: ' + (parseFloat(document.getElementById('cfg-limit-ratio-max').value) || 2.0));
+  L('  limit_probability: ' + parseFloat(document.getElementById('cfg-limit-prob').value));
+
+  const aaKeys = parseList('cfg-aa-keys');
+  L('  possible_anti_affinity_keys: [' + aaKeys.map(k => '"' + k + '"').join(', ') + ']');
+  L('  anti_affinity_probability: ' + parseFloat(document.getElementById('cfg-aa-prob').value));
+
+  const pattern = document.getElementById('cfg-arrival-pattern').value;
+  L('  arrival_pattern: "' + pattern + '"');
+  if (pattern === 'diurnal' || pattern === 'bursty') {
+    L('  diurnal_peak_rate: ' + (parseFloat(document.getElementById('cfg-diurnal-peak').value) || 3.0));
+    L('  diurnal_trough_rate: ' + (parseFloat(document.getElementById('cfg-diurnal-trough').value) || 0.3));
+    L('  bursty_spike_multiplier: ' + (parseFloat(document.getElementById('cfg-bursty-mult').value) || 5.0));
+    L('  bursty_spike_probability: ' + parseFloat(document.getElementById('cfg-bursty-prob').value));
+  }
+
+  const profile = document.getElementById('cfg-profile').value;
+  L('  profile: "' + profile + '"');
+  if (profile === 'mixed') {
+    const mix = getWeights('profile-mix-weights');
+    L('  profile_mix:');
+    Object.keys(mix).forEach(k => L('    ' + k + ': ' + mix[k]));
+  }
+
+  // GP
+  L('');
+  L('# ── Genetic Programming ─────────────────────────────────────────────────');
+  L('gp:');
+  L('  engine: "' + document.getElementById('cfg-engine').value + '"');
+  L('  population_size: ' + (parseInt(document.getElementById('cfg-pop-size').value) || 150));
+  L('  n_generations: ' + (parseInt(document.getElementById('cfg-generations').value) || 50));
+  L('  tournament_size: ' + (parseInt(document.getElementById('cfg-tournament').value) || 3));
+  L('  crossover_prob: ' + parseFloat(document.getElementById('cfg-cx-prob').value));
+  L('  mutation_prob: ' + parseFloat(document.getElementById('cfg-mut-prob').value));
+  L('  max_tree_depth: ' + (parseInt(document.getElementById('cfg-max-depth').value) || 10));
+  L('  elitism_ratio: ' + parseFloat(document.getElementById('cfg-elitism').value));
+  L('  parsimony_coefficient: ' + (parseFloat(document.getElementById('cfg-parsimony').value) || 0.001));
+
+  // Fitness
+  L('');
+  L('# ── Fitness weights (α·W + β·R + γ·F) ───────────────────────────────────');
+  L('fitness:');
+  const fw = getWeights('fitness-weights');
+  L('  alpha_wait_time: ' + (fw.alpha || 0));
+  L('  beta_resource_waste: ' + (fw.beta || 0));
+  L('  gamma_failed_pods: ' + (fw.gamma || 0));
+
+  // Dynamics
+  L('');
+  L('# ── Dynamics (node failures) ───────────────────────────────────────────');
+  L('dynamics:');
+  L('  failure_mode: "' + document.getElementById('cfg-failure-mode').value + '"');
+  L('  failure_rate: ' + (parseInt(document.getElementById('cfg-failure-rate').value) || 1));
+  L('  recovery_time_min: ' + (parseFloat(document.getElementById('cfg-rec-min').value) || 10));
+  L('  recovery_time_max: ' + (parseFloat(document.getElementById('cfg-rec-max').value) || 30));
+  L('  restart_overhead_min: ' + (parseFloat(document.getElementById('cfg-restart-min').value) || 2));
+  L('  restart_overhead_max: ' + (parseFloat(document.getElementById('cfg-restart-max').value) || 8));
+
+  const yaml = lines.join('\n');
+  document.getElementById('yaml-output').textContent = yaml;
+  return yaml;
+}
+
+/* ── Copy / Download ────────────────────────────────────────────────── */
+function copyYaml() {
+  const yaml = generateYaml();
+  navigator.clipboard.writeText(yaml).then(() => showToast('📋 YAML copiat!'));
+}
+
+function downloadYaml() {
+  const yaml = generateYaml();
+  const name = (document.getElementById('cfg-name').value || 'config').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const blob = new Blob([yaml], { type: 'text/yaml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name + '_config.yaml';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('💾 Fișier descărcat!');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+/* ── Import modal ───────────────────────────────────────────────────── */
+function showImportModal() {
+  document.getElementById('import-modal').classList.add('show');
+  document.getElementById('import-textarea').focus();
+}
+function hideImportModal() {
+  document.getElementById('import-modal').classList.remove('show');
+}
+
+function importYaml() {
+  const text = document.getElementById('import-textarea').value;
+  if (!text.trim()) { hideImportModal(); return; }
+
+  try {
+    // Simple YAML parser (handles the subset we generate)
+    const cfg = parseSimpleYaml(text);
+    populateFromConfig(cfg);
+    hideImportModal();
+    showToast('📥 YAML importat cu succes!');
+    validateAll();
+  } catch (e) {
+    alert('Eroare la parsarea YAML:\n' + e.message);
+  }
+}
+
+/* ── Simple YAML parser (no dependencies) ───────────────────────────── */
+function parseSimpleYaml(text) {
+  const result = {};
+  const lines = text.split('\n');
+  const stack = [{ obj: result, indent: -1 }];
+
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    // strip comments
+    const commentIdx = line.indexOf('#');
+    if (commentIdx >= 0) {
+      // don't strip # inside quotes
+      let inQuote = false;
+      let stripped = '';
+      for (let ci = 0; ci < line.length; ci++) {
+        if (line[ci] === '"') inQuote = !inQuote;
+        if (line[ci] === '#' && !inQuote) { stripped = line.substring(0, ci); break; }
+        stripped += line[ci];
+      }
+      line = stripped;
+    }
+
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+
+    const rawIndent = line.search(/\S/);
+    const trimmed = line.trim();
+
+    // Array item: "- key: value" or "- count: 5"
+    if (trimmed.startsWith('- ')) {
+      const content = trimmed.substring(2);
+      // pop stack to find parent
+      while (stack.length > 1 && stack[stack.length - 1].indent >= rawIndent) stack.pop();
+      const parent = stack[stack.length - 1].obj;
+
+      if (content.includes(':')) {
+        // object in array
+        const arrKey = Object.keys(parent).reverse().find(k => Array.isArray(parent[k]));
+        if (arrKey) {
+          const obj = {};
+          const [k, ...v] = content.split(':');
+          obj[k.trim()] = parseYamlValue(v.join(':').trim());
+          parent[arrKey].push(obj);
+          stack.push({ obj: obj, indent: rawIndent + 2 });
+        }
+      } else {
+        // simple array value
+        const arrKey = Object.keys(parent).reverse().find(k => Array.isArray(parent[k]));
+        if (arrKey) parent[arrKey].push(parseYamlValue(content));
+      }
+      continue;
+    }
+
+    // Key: value
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx < 0) continue;
+    const key = trimmed.substring(0, colonIdx).trim();
+    const val = trimmed.substring(colonIdx + 1).trim();
+
+    // pop stack to correct level
+    while (stack.length > 1 && stack[stack.length - 1].indent >= rawIndent) stack.pop();
+    const current = stack[stack.length - 1].obj;
+
+    if (val === '' || val === undefined) {
+      // nested object — check if next meaningful line is an array item
+      let nextLine = '';
+      for (let j = i + 1; j < lines.length; j++) {
+        const nl = lines[j].trim();
+        if (nl && !nl.startsWith('#')) { nextLine = nl; break; }
+      }
+      if (nextLine.startsWith('- ')) {
+        current[key] = [];
+      } else {
+        current[key] = {};
+      }
+      stack.push({ obj: current[key], indent: rawIndent });
+    } else {
+      // Check for inline array: [val1, val2]
+      if (val.startsWith('[') && val.endsWith(']')) {
+        const inner = val.slice(1, -1);
+        current[key] = inner.split(',').map(s => parseYamlValue(s.trim()));
+      } else {
+        current[key] = parseYamlValue(val);
+      }
+    }
+  }
+  return result;
+}
+
+function parseYamlValue(v) {
+  if (!v || v === '') return '';
+  // Remove quotes
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1);
+  }
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (v === 'null') return null;
+  const num = Number(v);
+  if (!isNaN(num) && v !== '') return num;
+  return v;
+}
+
+/* ── Populate form from parsed config ───────────────────────────────── */
+function populateFromConfig(cfg) {
+  function setVal(id, val) {
+    const el = document.getElementById(id);
+    if (!el || val === undefined || val === null) return;
+    if (el.type === 'range') {
+      el.value = typeof val === 'number' ? val : parseFloat(val);
+      el.dispatchEvent(new Event('input'));
+    } else {
+      el.value = val;
+    }
+  }
+
+  // General
+  setVal('cfg-name', cfg.name);
+  setVal('cfg-seed', cfg.seed);
+  setVal('cfg-train-instances', cfg.num_training_instances);
+  setVal('cfg-test-instances', cfg.num_test_instances);
+  setVal('cfg-dynamic-instances', cfg.dynamic_instances === true ? 'true' : 'false');
+  setVal('cfg-output-dir', cfg.output_dir);
+  setVal('cfg-output-format', cfg.output_format);
+
+  // Cluster
+  if (cfg.cluster && cfg.cluster.node_templates && Array.isArray(cfg.cluster.node_templates)) {
+    nodeTemplates = cfg.cluster.node_templates.map(nt => ({
+      count: nt.count || 5,
+      cpu_capacity: nt.cpu_capacity || 8,
+      mem_capacity: nt.mem_capacity || 16384,
+      cost_per_hour: nt.cost_per_hour != null ? nt.cost_per_hour : 1,
+      taints: Array.isArray(nt.taints) ? nt.taints.join(', ') : '',
+      labels: nt.labels && typeof nt.labels === 'object' ? Object.entries(nt.labels).map(([k, v]) => k + ': ' + v).join(', ') : '',
+    }));
+    renderNodeTable();
+  }
+
+  // Workload
+  if (cfg.workload) {
+    const w = cfg.workload;
+    setVal('cfg-total-pods', w.total_pods);
+    setVal('cfg-arrival-rate', w.arrival_rate);
+    if (w.burst_probability != null) { document.getElementById('cfg-burst-prob').value = w.burst_probability; document.getElementById('val-burst-prob').textContent = parseFloat(w.burst_probability).toFixed(2); }
+    setVal('cfg-burst-min', w.burst_size_min);
+    setVal('cfg-burst-max', w.burst_size_max);
+    if (Array.isArray(w.cpu_range)) { setVal('cfg-cpu-min', w.cpu_range[0]); setVal('cfg-cpu-max', w.cpu_range[1]); }
+    if (Array.isArray(w.mem_range)) { setVal('cfg-mem-min', w.mem_range[0]); setVal('cfg-mem-max', w.mem_range[1]); }
+    if (Array.isArray(w.duration_range)) { setVal('cfg-dur-min', w.duration_range[0]); setVal('cfg-dur-max', w.duration_range[1]); }
+    if (w.namespaces) { document.getElementById('cfg-namespaces').value = (Array.isArray(w.namespaces) ? w.namespaces : []).join('\n'); }
+    if (w.priority_weights) setWeights('priority-weights', w.priority_weights);
+    if (w.qos_weights) setWeights('qos-weights', w.qos_weights);
+    if (w.possible_taints) document.getElementById('cfg-taints').value = (Array.isArray(w.possible_taints) ? w.possible_taints : []).join('\n');
+    if (w.taint_toleration_probability != null) { document.getElementById('cfg-taint-prob').value = w.taint_toleration_probability; document.getElementById('val-taint-prob').textContent = parseFloat(w.taint_toleration_probability).toFixed(2); }
+    if (w.node_selector_probability != null) { document.getElementById('cfg-selector-prob').value = w.node_selector_probability; document.getElementById('val-selector-prob').textContent = parseFloat(w.node_selector_probability).toFixed(2); }
+    if (w.limit_probability != null) { document.getElementById('cfg-limit-prob').value = w.limit_probability; document.getElementById('val-limit-prob').textContent = parseFloat(w.limit_probability).toFixed(2); }
+    setVal('cfg-limit-ratio-min', w.limit_ratio_min);
+    setVal('cfg-limit-ratio-max', w.limit_ratio_max);
+    if (w.anti_affinity_probability != null) { document.getElementById('cfg-aa-prob').value = w.anti_affinity_probability; document.getElementById('val-aa-prob').textContent = parseFloat(w.anti_affinity_probability).toFixed(2); }
+    if (w.possible_anti_affinity_keys) document.getElementById('cfg-aa-keys').value = (Array.isArray(w.possible_anti_affinity_keys) ? w.possible_anti_affinity_keys : []).join('\n');
+    if (w.possible_labels && typeof w.possible_labels === 'object') {
+      document.getElementById('cfg-labels').value = Object.entries(w.possible_labels).map(([k, v]) => k + ': ' + (Array.isArray(v) ? v.join(', ') : v)).join('\n');
+    }
+    setVal('cfg-arrival-pattern', w.arrival_pattern || 'constant');
+    setVal('cfg-diurnal-peak', w.diurnal_peak_rate);
+    setVal('cfg-diurnal-trough', w.diurnal_trough_rate);
+    setVal('cfg-bursty-mult', w.bursty_spike_multiplier);
+    if (w.bursty_spike_probability != null) { document.getElementById('cfg-bursty-prob').value = w.bursty_spike_probability; document.getElementById('val-bursty-prob').textContent = parseFloat(w.bursty_spike_probability).toFixed(2); }
+    setVal('cfg-profile', w.profile || '');
+    if (w.profile_mix) setWeights('profile-mix-weights', w.profile_mix);
+    updateArrivalUI();
+    updateProfileUI();
+  }
+
+  // GP
+  if (cfg.gp) {
+    setVal('cfg-engine', cfg.gp.engine);
+    setVal('cfg-pop-size', cfg.gp.population_size);
+    setVal('cfg-generations', cfg.gp.n_generations);
+    setVal('cfg-tournament', cfg.gp.tournament_size);
+    setVal('cfg-max-depth', cfg.gp.max_tree_depth);
+    setVal('cfg-parsimony', cfg.gp.parsimony_coefficient);
+    if (cfg.gp.crossover_prob != null) { document.getElementById('cfg-cx-prob').value = cfg.gp.crossover_prob; document.getElementById('val-cx-prob').textContent = parseFloat(cfg.gp.crossover_prob).toFixed(2); }
+    if (cfg.gp.mutation_prob != null) { document.getElementById('cfg-mut-prob').value = cfg.gp.mutation_prob; document.getElementById('val-mut-prob').textContent = parseFloat(cfg.gp.mutation_prob).toFixed(2); }
+    if (cfg.gp.elitism_ratio != null) { document.getElementById('cfg-elitism').value = cfg.gp.elitism_ratio; document.getElementById('val-elitism').textContent = parseFloat(cfg.gp.elitism_ratio).toFixed(2); }
+  }
+
+  // Fitness
+  if (cfg.fitness) {
+    setWeights('fitness-weights', {
+      alpha: cfg.fitness.alpha_wait_time,
+      beta: cfg.fitness.beta_resource_waste,
+      gamma: cfg.fitness.gamma_failed_pods,
+    });
+    updateFitnessWeights();
+  }
+
+  // Dynamics
+  if (cfg.dynamics) {
+    setVal('cfg-failure-mode', cfg.dynamics.failure_mode || 'off');
+    setVal('cfg-failure-rate', cfg.dynamics.failure_rate);
+    setVal('cfg-rec-min', cfg.dynamics.recovery_time_min);
+    setVal('cfg-rec-max', cfg.dynamics.recovery_time_max);
+    setVal('cfg-restart-min', cfg.dynamics.restart_overhead_min);
+    setVal('cfg-restart-max', cfg.dynamics.restart_overhead_max);
+    updateDynamicsUI();
+  }
+}
+
+/* ── Presets ─────────────────────────────────────────────────────────── */
+const PRESETS = {
+  smoke: {
+    name: 'smoke_test', seed: 42, num_training_instances: 2, num_test_instances: 2,
+    dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [{ count: 3, cpu_capacity: 4.0, mem_capacity: 8192.0, cost_per_hour: 1.0 }] },
+    workload: {
+      total_pods: 20, arrival_rate: 2.0, burst_probability: 0.1, burst_size_min: 2, burst_size_max: 4,
+      cpu_range: [0.1, 1.5], mem_range: [128.0, 2048.0], duration_range: [3.0, 15.0],
+      priority_weights: { low: 0.5, medium: 0.3, high: 0.2 },
+      qos_weights: { best_effort: 0.4, burstable: 0.4, guaranteed: 0.2 },
+      namespaces: ['default', 'production'],
+      possible_taints: ['gpu'], taint_toleration_probability: 0.2,
+      possible_labels: { disktype: ['ssd'] }, node_selector_probability: 0.1,
+      limit_ratio_min: 1.0, limit_ratio_max: 1.5, limit_probability: 0.3,
+      possible_anti_affinity_keys: ['app-web'], anti_affinity_probability: 0.2,
+      arrival_pattern: 'constant', profile: ''
+    },
+    gp: { engine: 'deap', population_size: 15, n_generations: 5, tournament_size: 3,
+      crossover_prob: 0.8, mutation_prob: 0.2, max_tree_depth: 6, elitism_ratio: 0.1, parsimony_coefficient: 0.001 },
+    fitness: { alpha_wait_time: 0.4, beta_resource_waste: 0.3, gamma_failed_pods: 0.3 },
+    dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 5.0, recovery_time_max: 15.0,
+      restart_overhead_min: 1.0, restart_overhead_max: 4.0 }
+  },
+  small: {
+    name: 'small_experiment', seed: 42, num_training_instances: 2, num_test_instances: 2,
+    dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [{ count: 3, cpu_capacity: 4.0, mem_capacity: 8192.0, cost_per_hour: 0.5 }] },
+    workload: {
+      total_pods: 30, arrival_rate: 1.0, burst_probability: 0.1, burst_size_min: 2, burst_size_max: 5,
+      cpu_range: [0.1, 1.5], mem_range: [128.0, 2048.0], duration_range: [5.0, 30.0],
+      priority_weights: { low: 0.5, medium: 0.3, high: 0.2 },
+      qos_weights: { best_effort: 0.4, burstable: 0.4, guaranteed: 0.2 },
+      namespaces: ['default', 'production', 'batch'],
+      possible_taints: ['gpu', 'spot'], taint_toleration_probability: 0.3,
+      possible_labels: { disktype: ['ssd', 'hdd'] }, node_selector_probability: 0.15,
+      limit_ratio_min: 1.0, limit_ratio_max: 2.0, limit_probability: 0.4,
+      possible_anti_affinity_keys: ['app-web', 'app-api'], anti_affinity_probability: 0.25,
+      arrival_pattern: 'constant', profile: ''
+    },
+    gp: { engine: 'deap', population_size: 30, n_generations: 8, tournament_size: 3,
+      crossover_prob: 0.8, mutation_prob: 0.2, max_tree_depth: 8, elitism_ratio: 0.05, parsimony_coefficient: 0.001 },
+    fitness: { alpha_wait_time: 0.4, beta_resource_waste: 0.3, gamma_failed_pods: 0.3 },
+    dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 10.0, recovery_time_max: 30.0,
+      restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
+  },
+  medium: {
+    name: 'medium_experiment', seed: 42, num_training_instances: 4, num_test_instances: 3,
+    dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [{ count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0 }] },
+    workload: {
+      total_pods: 80, arrival_rate: 1.0, burst_probability: 0.1, burst_size_min: 3, burst_size_max: 8,
+      cpu_range: [0.1, 2.0], mem_range: [128.0, 4096.0], duration_range: [5.0, 50.0],
+      priority_weights: { low: 0.5, medium: 0.3, high: 0.2 },
+      qos_weights: { best_effort: 0.4, burstable: 0.4, guaranteed: 0.2 },
+      namespaces: ['default', 'production', 'batch'],
+      possible_taints: ['gpu', 'spot', 'dedicated'], taint_toleration_probability: 0.3,
+      possible_labels: { disktype: ['ssd', 'hdd'], zone: ['zone-a', 'zone-b'] }, node_selector_probability: 0.2,
+      limit_ratio_min: 1.0, limit_ratio_max: 2.0, limit_probability: 0.5,
+      possible_anti_affinity_keys: ['app-web', 'app-api', 'app-worker'], anti_affinity_probability: 0.3,
+      arrival_pattern: 'constant', profile: ''
+    },
+    gp: { engine: 'deap', population_size: 80, n_generations: 25, tournament_size: 3,
+      crossover_prob: 0.8, mutation_prob: 0.2, max_tree_depth: 10, elitism_ratio: 0.05, parsimony_coefficient: 0.001 },
+    fitness: { alpha_wait_time: 0.4, beta_resource_waste: 0.3, gamma_failed_pods: 0.3 },
+    dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 10.0, recovery_time_max: 30.0,
+      restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
+  },
+  large: {
+    name: 'large_experiment', seed: 42, num_training_instances: 5, num_test_instances: 5,
+    dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [
+      { count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0 },
+      { count: 5, cpu_capacity: 16.0, mem_capacity: 32768.0, cost_per_hour: 2.0 }
+    ]},
+    workload: {
+      total_pods: 200, arrival_rate: 1.0, burst_probability: 0.15, burst_size_min: 3, burst_size_max: 10,
+      cpu_range: [0.1, 4.0], mem_range: [128.0, 8192.0], duration_range: [5.0, 80.0],
+      priority_weights: { low: 0.4, medium: 0.35, high: 0.25 },
+      qos_weights: { best_effort: 0.3, burstable: 0.4, guaranteed: 0.3 },
+      namespaces: ['default', 'production', 'batch', 'staging'],
+      possible_taints: ['gpu', 'spot', 'dedicated'], taint_toleration_probability: 0.3,
+      possible_labels: { disktype: ['ssd', 'hdd'], zone: ['zone-a', 'zone-b', 'zone-c'] }, node_selector_probability: 0.25,
+      limit_ratio_min: 1.0, limit_ratio_max: 2.5, limit_probability: 0.6,
+      possible_anti_affinity_keys: ['app-web', 'app-api', 'app-worker', 'app-db'], anti_affinity_probability: 0.35,
+      arrival_pattern: 'constant', profile: ''
+    },
+    gp: { engine: 'deap', population_size: 150, n_generations: 50, tournament_size: 3,
+      crossover_prob: 0.8, mutation_prob: 0.2, max_tree_depth: 10, elitism_ratio: 0.05, parsimony_coefficient: 0.001 },
+    fitness: { alpha_wait_time: 0.4, beta_resource_waste: 0.3, gamma_failed_pods: 0.3 },
+    dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 10.0, recovery_time_max: 30.0,
+      restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
+  },
+  default: {
+    name: 'baseline_experiment', seed: 42, num_training_instances: 5, num_test_instances: 5,
+    dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [{ count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0 }] },
+    workload: {
+      total_pods: 100, arrival_rate: 1.0, burst_probability: 0.1, burst_size_min: 3, burst_size_max: 8,
+      cpu_range: [0.1, 2.0], mem_range: [128.0, 4096.0], duration_range: [5.0, 50.0],
+      priority_weights: { low: 0.5, medium: 0.3, high: 0.2 },
+      qos_weights: { best_effort: 0.4, burstable: 0.4, guaranteed: 0.2 },
+      namespaces: ['default', 'production', 'batch'],
+      possible_taints: ['gpu', 'spot', 'dedicated'], taint_toleration_probability: 0.3,
+      possible_labels: { disktype: ['ssd', 'hdd'], zone: ['zone-a', 'zone-b'] }, node_selector_probability: 0.2,
+      limit_ratio_min: 1.0, limit_ratio_max: 2.0, limit_probability: 0.5,
+      possible_anti_affinity_keys: ['app-web', 'app-api', 'app-worker'], anti_affinity_probability: 0.3,
+      arrival_pattern: 'constant', profile: '',
+      diurnal_peak_rate: 3.0, diurnal_trough_rate: 0.3, bursty_spike_multiplier: 5.0, bursty_spike_probability: 0.15
+    },
+    gp: { engine: 'deap', population_size: 150, n_generations: 50, tournament_size: 3,
+      crossover_prob: 0.8, mutation_prob: 0.2, max_tree_depth: 10, elitism_ratio: 0.05, parsimony_coefficient: 0.001 },
+    fitness: { alpha_wait_time: 0.4, beta_resource_waste: 0.3, gamma_failed_pods: 0.3 },
+    dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 10.0, recovery_time_max: 30.0,
+      restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
+  }
+};
+
+function loadPreset(name) {
+  const preset = PRESETS[name];
+  if (!preset) return;
+  populateFromConfig(preset);
+  showToast('⚡ Preset "' + name + '" încărcat!');
+  validateAll();
+}
+
+/* ── Listen for changes on all inputs ───────────────────────────────── */
+document.querySelectorAll('input, select, textarea').forEach(el => {
+  el.addEventListener('change', validateAll);
+  el.addEventListener('input', () => {
+    // debounced validation
+    clearTimeout(el._vt);
+    el._vt = setTimeout(validateAll, 150);
+  });
+});
+
+// Close modal on overlay click
+document.getElementById('import-modal').addEventListener('click', function(e) {
+  if (e.target === this) hideImportModal();
+});
+
+/* ── Init ───────────────────────────────────────────────────────────── */
+renderNodeTable();
+updateFitnessWeights();
+validateAll();
+</script>
+</body>
+</html>

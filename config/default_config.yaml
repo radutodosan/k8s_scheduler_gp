@@ -1,0 +1,94 @@
+# ──────────────────────────────────────────────────────────────────────────
+# K8s GP Scheduler — Default Experiment Configuration
+# ──────────────────────────────────────────────────────────────────────────
+
+name: "baseline_experiment"
+seed: 42
+num_training_instances: 5
+num_test_instances: 5
+dynamic_instances: false           # regenerate training instances each GP generation
+output_dir: "tmp/results"
+output_format: "csv"
+
+# ── Cluster ──────────────────────────────────────────────────────────────
+cluster:
+  node_templates:
+    - count: 5
+      cpu_capacity: 8.0         # cores
+      mem_capacity: 16384.0     # MiB (16 GB)
+      cost_per_hour: 1.0
+
+# ── Workload ─────────────────────────────────────────────────────────────
+workload:
+  total_pods: 100
+  arrival_rate: 1.0             # avg pods / time-unit (Poisson λ)
+  burst_probability: 0.1
+  burst_size_min: 3
+  burst_size_max: 8
+  cpu_range: [0.1, 2.0]
+  mem_range: [128.0, 4096.0]
+  duration_range: [5.0, 50.0]
+  priority_weights:
+    low: 0.5
+    medium: 0.3
+    high: 0.2
+  qos_weights:
+    best_effort: 0.4
+    burstable: 0.4
+    guaranteed: 0.2
+  namespaces: ["default", "production", "batch"]
+  # Taints, tolerations, labels, node selectors
+  possible_taints: ["gpu", "spot", "dedicated"]
+  taint_toleration_probability: 0.3
+  possible_labels:
+    disktype: ["ssd", "hdd"]
+    zone: ["zone-a", "zone-b"]
+  node_selector_probability: 0.2
+  # Limits & overcommit
+  limit_ratio_min: 1.0
+  limit_ratio_max: 2.0
+  limit_probability: 0.5
+  # Anti-affinity
+  possible_anti_affinity_keys: ["app-web", "app-api", "app-worker"]
+  anti_affinity_probability: 0.3
+  # Arrival patterns: "constant", "diurnal", "bursty"
+  arrival_pattern: "constant"
+  diurnal_peak_rate: 3.0
+  diurnal_trough_rate: 0.3
+  bursty_spike_multiplier: 5.0
+  bursty_spike_probability: 0.15
+  # Workload profile: "" (generic), "web_serving", "ai_training",
+  # "ci_cd", "batch_processing", "microservices", "mixed"
+  profile: ""
+  profile_mix:
+    web_serving: 0.30
+    ai_training: 0.10
+    ci_cd: 0.15
+    batch_processing: 0.20
+    microservices: 0.25
+
+# ── Genetic Programming ─────────────────────────────────────────────────
+gp:
+  engine: "deap"
+  population_size: 150
+  n_generations: 50
+  tournament_size: 3
+  crossover_prob: 0.8
+  mutation_prob: 0.2
+  max_tree_depth: 10
+  elitism_ratio: 0.05
+  parsimony_coefficient: 0.001
+
+# ── Fitness weights (α·W + β·R + γ·F) ───────────────────────────────────
+fitness:
+  alpha_wait_time: 0.4
+  beta_resource_waste: 0.3
+  gamma_failed_pods: 0.3
+# ── Dynamics (node failures) ───────────────────────────────────────────
+dynamics:
+  failure_mode: "off"               # "off" | "reschedule" | "kill"
+  failure_rate: 1                   # 1=10%, 2=20%, 3=30% of nodes
+  recovery_time_min: 10.0
+  recovery_time_max: 30.0
+  restart_overhead_min: 2.0         # extra time for pod restart (reschedule mode)
+  restart_overhead_max: 8.0

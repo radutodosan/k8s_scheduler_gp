@@ -1,0 +1,70 @@
+# Minimal config for quick smoke testing (< 30 seconds)
+name: "smoke_test"
+seed: 42
+num_training_instances: 2
+num_test_instances: 2
+dynamic_instances: false
+output_dir: "tmp/results"
+output_format: "csv"
+
+cluster:
+  node_templates:
+    - count: 3
+      cpu_capacity: 4.0
+      mem_capacity: 8192.0
+      cost_per_hour: 1.0
+
+workload:
+  total_pods: 20
+  arrival_rate: 2.0
+  burst_probability: 0.1
+  burst_size_min: 2
+  burst_size_max: 4
+  cpu_range: [0.1, 1.5]
+  mem_range: [128.0, 2048.0]
+  duration_range: [3.0, 15.0]
+  priority_weights:
+    low: 0.5
+    medium: 0.3
+    high: 0.2
+  qos_weights:
+    best_effort: 0.4
+    burstable: 0.4
+    guaranteed: 0.2
+  namespaces: ["default", "production"]
+  possible_taints: ["gpu"]
+  taint_toleration_probability: 0.2
+  possible_labels:
+    disktype: ["ssd"]
+  node_selector_probability: 0.1
+  limit_ratio_min: 1.0
+  limit_ratio_max: 1.5
+  limit_probability: 0.3
+  possible_anti_affinity_keys: ["app-web"]
+  anti_affinity_probability: 0.2
+  arrival_pattern: "constant"
+  profile: ""
+
+gp:
+  engine: "deap"
+  population_size: 15
+  n_generations: 5
+  tournament_size: 3
+  crossover_prob: 0.8
+  mutation_prob: 0.2
+  max_tree_depth: 6
+  elitism_ratio: 0.1
+  parsimony_coefficient: 0.001
+
+fitness:
+  alpha_wait_time: 0.4
+  beta_resource_waste: 0.3
+  gamma_failed_pods: 0.3
+
+dynamics:
+  failure_mode: "off"
+  failure_rate: 1
+  recovery_time_min: 5.0
+  recovery_time_max: 15.0
+  restart_overhead_min: 1.0
+  restart_overhead_max: 4.0
