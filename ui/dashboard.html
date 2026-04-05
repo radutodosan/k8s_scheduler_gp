@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K8s GP Scheduler — Results Dashboard</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   CSS — reusing the configurator theme system
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface2: #f0f1f5;
+  --border: #d1d5db;
+  --text: #1f2937;
+  --text2: #6b7280;
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --danger: #ef4444;
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --code-bg: #1e293b;
+  --code-text: #e2e8f0;
+  --radius: 8px;
+  --shadow: 0 1px 3px rgba(0,0,0,.1);
+}
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --surface2: #334155;
+  --border: #475569;
+  --text: #e2e8f0;
+  --text2: #94a3b8;
+  --primary: #60a5fa;
+  --primary-hover: #3b82f6;
+  --code-bg: #0f172a;
+  --code-text: #e2e8f0;
+  --shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* Header */
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+  box-shadow: var(--shadow);
+}
+.app-header h1 { font-size: 1.25rem; font-weight: 600; }
+.app-header h1 span { color: var(--primary); }
+.header-nav { display: flex; gap: 8px; align-items: center; }
+.nav-link {
+  padding: 4px 12px; border-radius: 6px; text-decoration: none;
+  font-size: .85rem; border: 1px solid var(--border);
+  color: var(--text); background: var(--surface2); transition: all .15s;
+}
+.nav-link:hover { border-color: var(--primary); color: var(--primary); }
+.nav-link.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.theme-toggle {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 12px; cursor: pointer;
+  font-size: .85rem; color: var(--text);
+}
+.theme-toggle:hover { border-color: var(--primary); }
+
+/* Layout */
+.container { max-width: 1300px; margin: 0 auto; padding: 20px; }
+
+/* Tabs */
+.tabs {
+  display: flex; gap: 0;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 20px; overflow-x: auto; flex-wrap: nowrap;
+}
+.tab-btn {
+  padding: 10px 20px; background: none; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+  cursor: pointer; font-size: .9rem; font-weight: 500;
+  color: var(--text2); white-space: nowrap;
+  transition: color .15s, border-color .15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Cards */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+  box-shadow: var(--shadow);
+}
+.card h3 {
+  font-size: 1rem; font-weight: 600; margin-bottom: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.card h4 {
+  font-size: .9rem; font-weight: 600; margin: 12px 0 8px;
+  color: var(--primary);
+}
+
+/* Status badges */
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 12px;
+  font-size: .78rem; font-weight: 600;
+}
+.badge-success { background: rgba(34,197,94,.15); color: #16a34a; }
+.badge-danger  { background: rgba(239,68,68,.15); color: #dc2626; }
+.badge-warning { background: rgba(245,158,11,.15); color: #d97706; }
+.badge-info    { background: rgba(59,130,246,.15); color: #2563eb; }
+[data-theme="dark"] .badge-success { color: #4ade80; }
+[data-theme="dark"] .badge-danger  { color: #f87171; }
+[data-theme="dark"] .badge-warning { color: #fbbf24; }
+[data-theme="dark"] .badge-info    { color: #60a5fa; }
+
+/* Tables */
+.data-table {
+  width: 100%; border-collapse: collapse; font-size: .82rem;
+  margin: 8px 0;
+}
+.data-table th, .data-table td {
+  padding: 6px 10px; border: 1px solid var(--border); text-align: left;
+}
+.data-table th {
+  background: var(--surface2); font-weight: 600;
+  position: sticky; top: 0; z-index: 2;
+}
+.data-table tr:hover td { background: var(--surface2); }
+.data-table-wrap {
+  max-height: 500px; overflow: auto; border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* List items (clickable) */
+.result-list { list-style: none; }
+.result-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 6px;
+  cursor: pointer; transition: background .15s, border-color .15s;
+  gap: 12px;
+}
+.result-item:hover { background: var(--surface2); border-color: var(--primary); }
+.result-item.active { border-color: var(--primary); background: var(--surface2); }
+.result-item .item-name { font-weight: 500; flex: 1; font-size: .88rem; }
+.result-item .item-meta { font-size: .78rem; color: var(--text2); display: flex; gap: 10px; }
+
+/* Split layout */
+.split-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+@media (max-width: 900px) { .split-layout { grid-template-columns: 1fr; } }
+.split-sidebar { max-height: calc(100vh - 160px); overflow-y: auto; }
+
+/* Charts */
+.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 16px; }
+.chart-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px;
+  position: relative;
+}
+.chart-card canvas { width: 100% !important; height: 260px !important; }
+.chart-card img { width: 100%; border-radius: 4px; cursor: pointer; }
+.chart-title { font-size: .85rem; font-weight: 600; margin-bottom: 8px; }
+.chart-actions {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; gap: 4px;
+}
+
+/* Buttons */
+.btn {
+  padding: 6px 14px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface); color: var(--text);
+  font-size: .82rem; cursor: pointer; transition: all .15s;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.btn:hover { border-color: var(--primary); color: var(--primary); }
+.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-sm { padding: 3px 8px; font-size: .75rem; }
+
+/* Code block */
+.code-block {
+  background: var(--code-bg); color: var(--code-text);
+  padding: 14px 16px; border-radius: var(--radius);
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: .82rem; overflow-x: auto; white-space: pre-wrap;
+  max-height: 400px; overflow-y: auto; line-height: 1.6;
+}
+
+/* Convergence chart inline */
+.convergence-mini { height: 200px; }
+
+/* Loading spinner */
+.loading {
+  display: flex; align-items: center; justify-content: center;
+  padding: 40px; color: var(--text2);
+}
+.spinner {
+  width: 24px; height: 24px; border: 3px solid var(--border);
+  border-top-color: var(--primary); border-radius: 50%;
+  animation: spin .6s linear infinite; margin-right: 10px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Image modal */
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7);
+  z-index: 1000; align-items: center; justify-content: center;
+}
+.modal-overlay.active { display: flex; }
+.modal-content {
+  max-width: 95vw; max-height: 95vh; position: relative;
+}
+.modal-content img { max-width: 100%; max-height: 90vh; border-radius: 6px; }
+.modal-close {
+  position: absolute; top: -12px; right: -12px;
+  background: var(--danger); color: #fff; border: none;
+  width: 28px; height: 28px; border-radius: 50%;
+  cursor: pointer; font-size: 1rem; display: flex;
+  align-items: center; justify-content: center;
+}
+.modal-download {
+  position: absolute; top: -12px; right: 24px;
+  background: var(--primary); color: #fff; border: none;
+  padding: 4px 10px; border-radius: 14px;
+  cursor: pointer; font-size: .78rem;
+}
+
+/* Summary stats row */
+.stats-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px; margin-bottom: 16px;
+}
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; text-align: center;
+}
+.stat-card .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--primary); }
+.stat-card .stat-label { font-size: .78rem; color: var(--text2); }
+
+/* Experiment group pills */
+.group-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.group-pill {
+  padding: 4px 12px; border-radius: 14px; font-size: .78rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  cursor: pointer; transition: all .15s;
+}
+.group-pill:hover, .group-pill.active {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .container { padding: 10px; }
+  .chart-grid { grid-template-columns: 1fr; }
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+<script src="/shared.js"></script>
+<script>initTheme();</script>
+</head>
+<body>
+<script>initNavbar('dashboard');</script>
+
+<div class="container">
+  <div class="tabs" id="mainTabs">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="tests">🧪 Teste</button>
+    <button class="tab-btn" data-tab="runs">▶ Rulări</button>
+    <button class="tab-btn" data-tab="experiments">🔬 Experimente</button>
+  </div>
+
+  <!-- ═══════════════ OVERVIEW TAB ═══════════════ -->
+  <div class="tab-panel active" id="tab-overview">
+    <div class="stats-row" id="globalStats">
+      <div class="stat-card"><div class="stat-value" id="statTestRuns">-</div><div class="stat-label">Rulări Teste</div></div>
+      <div class="stat-card"><div class="stat-value" id="statSingleRuns">-</div><div class="stat-label">Rulări Individuale</div></div>
+      <div class="stat-card"><div class="stat-value" id="statExpSweeps">-</div><div class="stat-label">Sweep-uri Experimente</div></div>
+      <div class="stat-card"><div class="stat-value" id="statTotalTests">-</div><div class="stat-label">Total Teste (ultimul)</div></div>
+      <div class="stat-card"><div class="stat-value" id="statPassRate">-</div><div class="stat-label">Pass Rate (ultimul)</div></div>
+    </div>
+    <div class="card">
+      <h3>Activitate recentă</h3>
+      <div id="recentActivity"><div class="loading"><div class="spinner"></div>Se încarcă...</div></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ TESTS TAB ═══════════════ -->
+  <div class="tab-panel" id="tab-tests">
+    <div class="split-layout">
+      <div class="split-sidebar">
+        <div class="card" style="padding: 12px;">
+          <h3 style="margin-bottom: 8px;">Istoric Teste</h3>
+          <ul class="result-list" id="testList">
+            <li class="loading"><div class="spinner"></div>Se încarcă...</li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <div class="card" id="testDetail">
+          <h3>Selectează o rulare de teste</h3>
+          <p style="color: var(--text2);">Click pe o intrare din lista din stânga pentru a vedea detaliile.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ RUNS TAB ═══════════════ -->
+  <div class="tab-panel" id="tab-runs">
+    <div class="split-layout">
+      <div class="split-sidebar">
+        <div class="card" style="padding: 12px;">
+          <h3 style="margin-bottom: 8px;">Rulări Individuale</h3>
+          <ul class="result-list" id="runList">
+            <li class="loading"><div class="spinner"></div>Se încarcă...</li>
+          </ul>
+        </div>
+      </div>
+      <div>
+        <div class="card" id="runDetail">
+          <h3>Selectează o rulare</h3>
+          <p style="color: var(--text2);">Click pe o intrare din lista din stânga pentru a vedea rezultatele.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ EXPERIMENTS TAB ═══════════════ -->
+  <div class="tab-panel" id="tab-experiments">
+    <div class="split-layout">
+      <div class="split-sidebar">
+        <div class="card" style="padding: 12px;">
+          <h3 style="margin-bottom: 8px;">Sweep-uri Experimente</h3>
+          <ul class="result-list" id="expList">
+            <li class="loading"><div class="spinner"></div>Se încarcă...</li>
+          </ul>
+        </div>
+      </div>
+      <div id="expDetailContainer">
+        <div class="card" id="expDetail">
+          <h3>Selectează un sweep de experimente</h3>
+          <p style="color: var(--text2);">Click pe o intrare din lista din stânga pentru a vedea rezultatele.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Image Modal -->
+<div class="modal-overlay" id="imageModal">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <button class="modal-download" id="modalDownload" onclick="downloadModalImage()">⬇ Download</button>
+    <img id="modalImg" src="" alt="Chart">
+  </div>
+</div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   Application State
+   ═══════════════════════════════════════════════════════════════════════ */
+let testsData = [], runsData = [], expsData = [];
+let chartInstances = {};  // track Chart.js instances for cleanup
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Tabs
+   ═══════════════════════════════════════════════════════════════════════ */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Data Fetching
+   ═══════════════════════════════════════════════════════════════════════ */
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function loadAll() {
+  try {
+    [testsData, runsData, expsData] = await Promise.all([
+      fetchJSON('/api/tests'),
+      fetchJSON('/api/runs'),
+      fetchJSON('/api/experiments'),
+    ]);
+  } catch(e) {
+    console.error('Failed to load data:', e);
+    testsData = []; runsData = []; expsData = [];
+  }
+  renderOverview();
+  renderTestList();
+  renderRunList();
+  renderExpList();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   OVERVIEW
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderOverview() {
+  document.getElementById('statTestRuns').textContent = testsData.length;
+  document.getElementById('statSingleRuns').textContent = runsData.length;
+  document.getElementById('statExpSweeps').textContent = expsData.length;
+
+  const latest = testsData[0];
+  if (latest && latest.tests !== undefined) {
+    document.getElementById('statTotalTests').textContent = latest.tests;
+    const passed = latest.tests - (latest.failures || 0) - (latest.errors || 0);
+    const pct = latest.tests > 0 ? Math.round(passed / latest.tests * 100) : 0;
+    document.getElementById('statPassRate').textContent = pct + '%';
+    document.getElementById('statPassRate').style.color =
+      pct === 100 ? 'var(--success)' : pct >= 80 ? 'var(--warning)' : 'var(--danger)';
+  }
+
+  // Recent activity timeline
+  const items = [];
+  testsData.slice(0, 5).forEach(t => {
+    const passed = t.tests - (t.failures || 0) - (t.errors || 0);
+    const ok = (t.failures || 0) === 0 && (t.errors || 0) === 0;
+    items.push({
+      time: t.timestamp || t.name,
+      type: 'test',
+      label: `Teste: ${passed}/${t.tests} trecute`,
+      badge: ok ? 'success' : 'danger',
+      badgeText: ok ? 'PASS' : 'FAIL',
+      detail: `${(t.time || 0).toFixed(2)}s`,
+    });
+  });
+  runsData.slice(0, 3).forEach(r => {
+    const nRows = r.csv ? r.csv.length : 0;
+    items.push({
+      time: r.name,
+      type: 'run',
+      label: `Rulare: ${nRows} rezultate`,
+      badge: 'info',
+      badgeText: 'RUN',
+      detail: r.rule ? r.rule.split('\n').find(l => l.includes('Fitness'))?.trim() || '' : '',
+    });
+  });
+  expsData.slice(0, 3).forEach(e => {
+    const nExp = e.experiments ? e.experiments.length : 0;
+    items.push({
+      time: e.name,
+      type: 'experiment',
+      label: `Experiment sweep: ${nExp} experimente`,
+      badge: 'warning',
+      badgeText: 'SWEEP',
+      detail: '',
+    });
+  });
+
+  // Sort by name (timestamp desc)
+  items.sort((a, b) => b.time.localeCompare(a.time));
+
+  const html = items.slice(0, 12).map(i => `
+    <div class="result-item" style="cursor:default;">
+      <div class="item-name">
+        <span class="badge badge-${i.badge}">${i.badgeText}</span>
+        &nbsp;${escHtml(i.label)}
+      </div>
+      <div class="item-meta">
+        <span>${escHtml(i.detail)}</span>
+        <span>${escHtml(formatTimestamp(i.time))}</span>
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('recentActivity').innerHTML = html || '<p style="color:var(--text2)">Nu există rezultate încă.</p>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TESTS
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderTestList() {
+  const list = document.getElementById('testList');
+  if (!testsData.length) {
+    list.innerHTML = '<li style="padding:12px;color:var(--text2)">Nu există rezultate teste.</li>';
+    return;
+  }
+  list.innerHTML = testsData.map((t, i) => {
+    const ok = (t.failures || 0) === 0 && (t.errors || 0) === 0;
+    const passed = (t.tests||0) - (t.failures||0) - (t.errors||0);
+    return `<li class="result-item" onclick="showTest(${i})">
+      <div class="item-name">
+        <span class="badge badge-${ok ? 'success' : 'danger'}">${ok ? '✓' : '✕'}</span>
+        &nbsp;${escHtml(formatTimestamp(t.name))}
+      </div>
+      <div class="item-meta">
+        <span>${passed}/${t.tests||'?'}</span>
+        <span>${(t.time||0).toFixed(1)}s</span>
+      </div>
+    </li>`;
+  }).join('');
+}
+
+function showTest(idx) {
+  const t = testsData[idx];
+  document.querySelectorAll('#testList .result-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+
+  const passed = (t.tests||0) - (t.failures||0) - (t.errors||0);
+  const ok = (t.failures||0) === 0 && (t.errors||0) === 0;
+
+  let html = `<h3>${escHtml(formatTimestamp(t.name))}
+    <span class="badge badge-${ok ? 'success' : 'danger'}" style="margin-left:8px">${ok ? 'ALL PASSED' : 'FAILURES'}</span></h3>`;
+
+  html += `<div class="stats-row">
+    <div class="stat-card"><div class="stat-value" style="color:var(--success)">${passed}</div><div class="stat-label">Passed</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${t.failures||0}</div><div class="stat-label">Failed</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${t.errors||0}</div><div class="stat-label">Errors</div></div>
+    <div class="stat-card"><div class="stat-value">${(t.time||0).toFixed(2)}s</div><div class="stat-label">Durată</div></div>
+  </div>`;
+
+  if (t.cases && t.cases.length) {
+    // Group by class
+    const groups = {};
+    t.cases.forEach(c => {
+      const cls = c.classname || 'ungrouped';
+      if (!groups[cls]) groups[cls] = [];
+      groups[cls].push(c);
+    });
+
+    html += '<h4>Detalii teste</h4>';
+    for (const [cls, cases] of Object.entries(groups)) {
+      const allPass = cases.every(c => c.status === 'passed');
+      const shortCls = cls.split('.').slice(-1)[0];
+      html += `<details ${!allPass ? 'open' : ''}>
+        <summary style="cursor:pointer;margin:4px 0;font-weight:500;">
+          <span class="badge badge-${allPass ? 'success' : 'danger'}">${cases.length}</span>
+          ${escHtml(shortCls)}
+        </summary>
+        <div class="data-table-wrap" style="max-height:250px;">
+        <table class="data-table">
+          <tr><th>Test</th><th>Status</th><th>Timp</th></tr>
+          ${cases.map(c => `<tr>
+            <td>${escHtml(c.name)}</td>
+            <td><span class="badge badge-${c.status === 'passed' ? 'success' : c.status === 'failed' ? 'danger' : 'warning'}">${c.status}</span></td>
+            <td>${(c.time*1000).toFixed(1)}ms</td>
+          </tr>`).join('')}
+        </table>
+        </div>
+      </details>`;
+    }
+  }
+
+  document.getElementById('testDetail').innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RUNS
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderRunList() {
+  const list = document.getElementById('runList');
+  if (!runsData.length) {
+    list.innerHTML = '<li style="padding:12px;color:var(--text2)">Nu există rulări individuale.</li>';
+    return;
+  }
+  list.innerHTML = runsData.map((r, i) => {
+    const nRows = r.csv ? r.csv.length : 0;
+    const nImg = r.images ? r.images.length : 0;
+    return `<li class="result-item" onclick="showRun(${i})">
+      <div class="item-name">${escHtml(formatTimestamp(r.name))}</div>
+      <div class="item-meta">
+        <span>${nRows} rânduri</span>
+        <span>${nImg} grafice</span>
+      </div>
+    </li>`;
+  }).join('');
+}
+
+async function showRun(idx) {
+  const r = runsData[idx];
+  document.querySelectorAll('#runList .result-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+
+  let html = `<h3>Rulare: ${escHtml(formatTimestamp(r.name))}
+    <button class="btn btn-sm" style="margin-left:8px" onclick="downloadCSV(runsData[${idx}].csv, '${r.name}_results.csv')">⬇ Export CSV</button>
+  </h3>`;
+
+  // GP rule
+  if (r.rule) {
+    html += `<h4>Regula GP Evoluată</h4><div class="code-block">${escHtml(r.rule)}</div>`;
+  }
+
+  // Results table
+  if (r.csv && r.csv.length) {
+    html += `<h4>Rezultate Strategii</h4>`;
+    html += renderCSVTable(r.csv);
+
+    // Build interactive bar chart
+    html += `<h4>Comparație Strategii</h4>`;
+    html += `<div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-title">Scheduling Success Rate</div>
+        <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('runChart1')">⬇</button></div>
+        <canvas id="runChart1"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Avg Wait Time</div>
+        <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('runChart2')">⬇</button></div>
+        <canvas id="runChart2"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">CPU Utilization</div>
+        <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('runChart3')">⬇</button></div>
+        <canvas id="runChart3"></canvas>
+      </div>
+    </div>`;
+  }
+
+  // Images
+  if (r.images && r.images.length) {
+    html += `<h4>Grafice Generate</h4><div class="chart-grid">`;
+    for (const imgPath of r.images) {
+      const fname = imgPath.split('/').pop();
+      html += `<div class="chart-card" id="imgcard-${fname}">
+        <div class="chart-title">${escHtml(fname.replace(/_/g, ' ').replace('.png',''))}</div>
+        <div class="chart-actions">
+          <button class="btn btn-sm" onclick="downloadImageFromCard('imgcard-${fname}')">⬇</button>
+        </div>
+        <img data-src="${imgPath}" class="lazy-img" alt="${fname}"
+             onclick="openModal(this.src, '${fname}')">
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  document.getElementById('runDetail').innerHTML = html;
+
+  // Load lazy images
+  loadLazyImages();
+
+  // Build charts
+  if (r.csv && r.csv.length) {
+    await buildRunCharts(r.csv);
+  }
+}
+
+async function buildRunCharts(csv) {
+  // Aggregate by strategy (mean across instances)
+  const stratData = aggregateByStrategy(csv);
+  const strategies = Object.keys(stratData);
+  const colors = generateColors(strategies.length);
+
+  destroyChart('runChart1');
+  destroyChart('runChart2');
+  destroyChart('runChart3');
+
+  buildBarChart('runChart1', strategies, strategies.map(s => stratData[s].scheduling_success_rate), colors, 'Sched. Success Rate');
+  buildBarChart('runChart2', strategies, strategies.map(s => stratData[s].avg_wait_time), colors, 'Avg Wait Time');
+  buildBarChart('runChart3', strategies, strategies.map(s => stratData[s].avg_cpu_utilization), colors, 'Avg CPU Util.');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   EXPERIMENTS
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderExpList() {
+  const list = document.getElementById('expList');
+  if (!expsData.length) {
+    list.innerHTML = '<li style="padding:12px;color:var(--text2)">Nu există sweep-uri de experimente.</li>';
+    return;
+  }
+  list.innerHTML = expsData.map((e, i) => {
+    const nExp = e.experiments ? e.experiments.length : 0;
+    return `<li class="result-item" onclick="showExperiment(${i})">
+      <div class="item-name">${escHtml(formatTimestamp(e.name))}</div>
+      <div class="item-meta"><span>${nExp} exp.</span></div>
+    </li>`;
+  }).join('');
+}
+
+async function showExperiment(idx) {
+  const e = expsData[idx];
+  document.querySelectorAll('#expList .result-item').forEach((el, i) => {
+    el.classList.toggle('active', i === idx);
+  });
+
+  let html = `<h3>Sweep: ${escHtml(formatTimestamp(e.name))}
+    <button class="btn btn-sm" style="margin-left:8px" onclick="downloadCSV(expsData[${idx}].combined_csv, '${e.name}_combined.csv')">⬇ Export CSV</button>
+  </h3>`;
+
+  // Summary stats
+  if (e.experiments && e.experiments.length) {
+    const groups = [...new Set(e.experiments.map(x => x.metadata?.group || 'unknown'))];
+    html += `<div class="stats-row">
+      <div class="stat-card"><div class="stat-value">${e.experiments.length}</div><div class="stat-label">Experimente</div></div>
+      <div class="stat-card"><div class="stat-value">${groups.length}</div><div class="stat-label">Grupuri</div></div>
+      <div class="stat-card"><div class="stat-value">${e.combined_csv ? e.combined_csv.length : 0}</div><div class="stat-label">Rezultate Totale</div></div>
+    </div>`;
+
+    // Group filter pills
+    html += `<div class="group-pills" id="groupPills">
+      <span class="group-pill active" onclick="filterExpGroup('all', ${idx})">Toate</span>
+      ${groups.map(g => `<span class="group-pill" onclick="filterExpGroup('${g}', ${idx})">${escHtml(g)}</span>`).join('')}
+    </div>`;
+
+    // Per-experiment cards
+    html += `<div id="expCards">`;
+    for (const exp of e.experiments) {
+      const m = exp.metadata || {};
+      html += `<div class="card exp-card" data-group="${m.group || 'unknown'}" style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div>
+            <strong>${escHtml(exp.name)}</strong>
+            <span class="badge badge-info" style="margin-left:6px">${escHtml(m.group || '?')}</span>
+          </div>
+          <div style="font-size:.8rem;color:var(--text2)">
+            ${m.engine || '?'} | pop=${m.population_size || '?'} gen=${m.n_generations || '?'} | ${m.total_pods || '?'} pods
+          </div>
+        </div>`;
+
+      // Metadata summary
+      if (m.best_fitness !== undefined) {
+        html += `<div style="display:flex;gap:16px;font-size:.82rem;margin-bottom:6px;flex-wrap:wrap;">
+          <span>Fitness: <strong>${Number(m.best_fitness).toFixed(4)}</strong></span>
+          <span>Timp: <strong>${Number(m.training_time_s || 0).toFixed(2)}s</strong></span>
+          <span>α=${m.alpha} β=${m.beta} γ=${m.gamma}</span>
+        </div>`;
+      }
+
+      // Expression
+      if (m.best_expression) {
+        html += `<div class="code-block" style="font-size:.75rem;max-height:60px;margin-bottom:6px;">${escHtml(m.best_expression)}</div>`;
+      }
+
+      // Convergence mini-chart
+      if (exp.convergence && exp.convergence.length > 1) {
+        const cid = 'conv_' + exp.name.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `<div style="display:flex;gap:8px;align-items:flex-end;">
+          <canvas id="${cid}" class="convergence-mini" style="flex:1;height:120px;"></canvas>
+          <button class="btn btn-sm" onclick="downloadChart('${cid}')" style="align-self:start;">⬇</button>
+        </div>`;
+      }
+
+      // Results table (collapsed)
+      if (exp.results && exp.results.length) {
+        html += `<details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:.82rem;color:var(--primary)">Tabel rezultate (${exp.results.length} rânduri)</summary>
+          ${renderCSVTable(exp.results)}
+        </details>`;
+      }
+
+      html += `</div>`;
+    }
+    html += `</div>`;
+  }
+
+  // Combined comparison chart
+  if (e.combined_csv && e.combined_csv.length) {
+    html += `<div class="card">
+      <h3>Comparație Combinată Strategii
+        <button class="btn btn-sm" style="margin-left:8px" onclick="downloadChart('expCombChart1')">⬇</button>
+      </h3>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <div class="chart-title">Scheduling Success Rate (medie)</div>
+          <canvas id="expCombChart1"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">Avg Wait Time (medie)</div>
+          <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('expCombChart2')">⬇</button></div>
+          <canvas id="expCombChart2"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-title">CPU Utilization (medie)</div>
+          <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('expCombChart3')">⬇</button></div>
+          <canvas id="expCombChart3"></canvas>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Analysis plots
+  if (e.analysis && e.analysis.plots && e.analysis.plots.length) {
+    html += `<div class="card">
+      <h3>Grafice Analiză</h3>
+      <div class="chart-grid">`;
+    for (const p of e.analysis.plots) {
+      const fname = p.split('/').pop();
+      const cardId = 'aplot-' + fname.replace(/[^a-zA-Z0-9]/g, '_');
+      html += `<div class="chart-card" id="${cardId}">
+        <div class="chart-title">${escHtml(fname.replace(/_/g, ' ').replace('.png',''))}</div>
+        <div class="chart-actions">
+          <button class="btn btn-sm" onclick="downloadImageFromCard('${cardId}')">⬇</button>
+        </div>
+        <img data-src="${p}" class="lazy-img" alt="${fname}"
+             onclick="openModal(this.src, '${fname}')">
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Analysis reports
+  if (e.analysis) {
+    for (const key of ['analysis_report.txt', 'statistical_report.txt']) {
+      if (e.analysis[key]) {
+        const title = key === 'analysis_report.txt' ? 'Raport Analiză' : 'Raport Statistic';
+        html += `<div class="card">
+          <h3>${title}
+            <button class="btn btn-sm" style="margin-left:8px" onclick="downloadText(expsData[${idx}].analysis['${key}'], '${key}')">⬇ Download</button>
+          </h3>
+          <details><summary style="cursor:pointer;color:var(--primary);font-size:.85rem;">Afișează raportul</summary>
+            <div class="code-block" style="margin-top:8px;">${escHtml(e.analysis[key])}</div>
+          </details>
+        </div>`;
+      }
+    }
+  }
+
+  document.getElementById('expDetailContainer').innerHTML = `<div id="expDetail">${html}</div>`;
+
+  // Load lazy images
+  loadLazyImages();
+
+  // Build convergence mini-charts
+  if (e.experiments) {
+    for (const exp of e.experiments) {
+      if (exp.convergence && exp.convergence.length > 1) {
+        const cid = 'conv_' + exp.name.replace(/[^a-zA-Z0-9]/g, '_');
+        buildConvergenceChart(cid, exp.convergence);
+      }
+    }
+  }
+
+  // Build combined charts
+  if (e.combined_csv && e.combined_csv.length) {
+    const stratData = aggregateByStrategy(e.combined_csv);
+    const strategies = Object.keys(stratData);
+    const colors = generateColors(strategies.length);
+    buildBarChart('expCombChart1', strategies, strategies.map(s => stratData[s].scheduling_success_rate), colors, 'Sched. Success');
+    buildBarChart('expCombChart2', strategies, strategies.map(s => stratData[s].avg_wait_time), colors, 'Avg Wait');
+    buildBarChart('expCombChart3', strategies, strategies.map(s => stratData[s].avg_cpu_utilization), colors, 'CPU Util.');
+  }
+}
+
+function filterExpGroup(group, idx) {
+  document.querySelectorAll('#groupPills .group-pill').forEach(p => {
+    p.classList.toggle('active', p.textContent.trim() === group || (group === 'all' && p.textContent.trim() === 'Toate'));
+  });
+  document.querySelectorAll('.exp-card').forEach(card => {
+    if (group === 'all') {
+      card.style.display = '';
+    } else {
+      card.style.display = card.dataset.group === group ? '' : 'none';
+    }
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CHART HELPERS
+   ═══════════════════════════════════════════════════════════════════════ */
+function destroyChart(id) {
+  if (chartInstances[id]) {
+    chartInstances[id].destroy();
+    delete chartInstances[id];
+  }
+}
+
+function buildBarChart(canvasId, labels, values, colors, title) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  destroyChart(canvasId);
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(148,163,184,.2)' : 'rgba(0,0,0,.08)';
+  const textColor = isDark ? '#94a3b8' : '#6b7280';
+
+  chartInstances[canvasId] = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        borderColor: colors.map(c => c.replace('0.7', '1')),
+        borderWidth: 1,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, title: { display: false } },
+      scales: {
+        x: { ticks: { color: textColor, font: { size: 10 }, maxRotation: 35 }, grid: { display: false } },
+        y: { ticks: { color: textColor, font: { size: 10 } }, grid: { color: gridColor } },
+      },
+    },
+  });
+}
+
+function buildConvergenceChart(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  destroyChart(canvasId);
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(148,163,184,.2)' : 'rgba(0,0,0,.08)';
+  const textColor = isDark ? '#94a3b8' : '#6b7280';
+
+  chartInstances[canvasId] = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: data.map(d => d.gen),
+      datasets: [
+        {
+          label: 'Best',
+          data: data.map(d => d.min),
+          borderColor: '#22c55e',
+          backgroundColor: 'rgba(34,197,94,.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 2,
+          borderWidth: 2,
+        },
+        {
+          label: 'Avg',
+          data: data.map(d => d.avg),
+          borderColor: '#60a5fa',
+          borderDash: [4, 4],
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 1.5,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 }, color: textColor } },
+      },
+      scales: {
+        x: { title: { display: true, text: 'Gen', font: { size: 10 }, color: textColor }, ticks: { color: textColor, font: { size: 9 } }, grid: { display: false } },
+        y: { title: { display: true, text: 'Fitness', font: { size: 10 }, color: textColor }, ticks: { color: textColor, font: { size: 9 } }, grid: { color: gridColor } },
+      },
+    },
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DATA UTILITIES
+   ═══════════════════════════════════════════════════════════════════════ */
+function aggregateByStrategy(csv) {
+  const groups = {};
+  csv.forEach(row => {
+    const s = row.strategy;
+    if (!groups[s]) groups[s] = { scheduling_success_rate: [], avg_wait_time: [], avg_cpu_utilization: [], avg_mem_utilization: [] };
+    groups[s].scheduling_success_rate.push(parseFloat(row.scheduling_success_rate) || 0);
+    groups[s].avg_wait_time.push(parseFloat(row.avg_wait_time) || 0);
+    groups[s].avg_cpu_utilization.push(parseFloat(row.avg_cpu_utilization) || 0);
+    groups[s].avg_mem_utilization.push(parseFloat(row.avg_mem_utilization) || 0);
+  });
+  const result = {};
+  for (const [s, vals] of Object.entries(groups)) {
+    result[s] = {};
+    for (const [k, arr] of Object.entries(vals)) {
+      result[s][k] = arr.reduce((a, b) => a + b, 0) / arr.length;
+    }
+  }
+  return result;
+}
+
+function renderCSVTable(csv) {
+  if (!csv || !csv.length) return '<p style="color:var(--text2)">Fără date.</p>';
+  const cols = Object.keys(csv[0]);
+  // Limit columns for readability
+  const importantCols = ['strategy','experiment','instance_id','total_pods','scheduled_pods','rejected_pods',
+    'scheduling_success_rate','avg_wait_time','avg_cpu_utilization','avg_mem_utilization','throughput'];
+  const displayCols = cols.filter(c => importantCols.includes(c));
+  const extraCols = cols.filter(c => !importantCols.includes(c));
+  const shownCols = displayCols.length ? displayCols : cols.slice(0, 12);
+
+  let html = `<div class="data-table-wrap"><table class="data-table"><thead><tr>`;
+  shownCols.forEach(c => { html += `<th>${escHtml(c)}</th>`; });
+  html += `</tr></thead><tbody>`;
+  csv.forEach(row => {
+    html += `<tr>`;
+    shownCols.forEach(c => {
+      let val = row[c] || '';
+      // Format numbers
+      if (/^-?\d+\.?\d*$/.test(val)) {
+        const n = parseFloat(val);
+        val = Number.isInteger(n) ? n.toString() : n.toFixed(4);
+      }
+      html += `<td>${escHtml(val)}</td>`;
+    });
+    html += `</tr>`;
+  });
+  html += `</tbody></table></div>`;
+  return html;
+}
+
+function generateColors(n) {
+  const base = [
+    'rgba(59,130,246,0.7)', 'rgba(34,197,94,0.7)', 'rgba(245,158,11,0.7)',
+    'rgba(239,68,68,0.7)', 'rgba(168,85,247,0.7)', 'rgba(236,72,153,0.7)',
+    'rgba(20,184,166,0.7)', 'rgba(249,115,22,0.7)', 'rgba(99,102,241,0.7)',
+    'rgba(156,163,175,0.7)',
+  ];
+  const result = [];
+  for (let i = 0; i < n; i++) result.push(base[i % base.length]);
+  return result;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LAZY IMAGE LOADING (via API to avoid CORS issues)
+   ═══════════════════════════════════════════════════════════════════════ */
+async function loadLazyImages() {
+  const imgs = document.querySelectorAll('img.lazy-img[data-src]');
+  for (const img of imgs) {
+    const src = img.getAttribute('data-src');
+    if (!src) continue;
+    try {
+      const resp = await fetchJSON('/api/image?path=' + encodeURIComponent(src));
+      if (resp.data_url) {
+        img.src = resp.data_url;
+        img.removeAttribute('data-src');
+      }
+    } catch(e) {
+      img.alt = 'Eroare la încărcare';
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MODAL
+   ═══════════════════════════════════════════════════════════════════════ */
+let currentModalSrc = '', currentModalName = '';
+
+function openModal(src, name) {
+  currentModalSrc = src;
+  currentModalName = name;
+  document.getElementById('modalImg').src = src;
+  document.getElementById('imageModal').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('imageModal').classList.remove('active');
+}
+
+function downloadModalImage() {
+  downloadDataUrl(currentModalSrc, currentModalName);
+}
+
+document.getElementById('imageModal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeModal();
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DOWNLOAD HELPERS
+   ═══════════════════════════════════════════════════════════════════════ */
+function downloadChart(canvasId) {
+  const chart = chartInstances[canvasId];
+  if (!chart) return;
+  const url = chart.canvas.toDataURL('image/png');
+  downloadDataUrl(url, canvasId + '.png');
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+function downloadImageFromCard(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const img = card.querySelector('img');
+  if (img && img.src) {
+    downloadDataUrl(img.src, img.alt || 'chart.png');
+  }
+}
+
+function downloadCSV(csv, filename) {
+  if (!csv || !csv.length) return;
+  const cols = Object.keys(csv[0]);
+  let text = cols.join(',') + '\n';
+  csv.forEach(row => {
+    text += cols.map(c => {
+      let v = row[c] || '';
+      if (v.includes(',') || v.includes('"') || v.includes('\n')) {
+        v = '"' + v.replace(/"/g, '""') + '"';
+      }
+      return v;
+    }).join(',') + '\n';
+  });
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  downloadDataUrl(url, filename);
+  URL.revokeObjectURL(url);
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  downloadDataUrl(url, filename);
+  URL.revokeObjectURL(url);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ═══════════════════════════════════════════════════════════════════════ */
+function escHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function formatTimestamp(name) {
+  // Convert "2026_03_29_1950" -> "2026-03-29 19:50"
+  // or "2026_03_29_2011_results" -> "2026-03-29 20:11"
+  if (!name) return '';
+  const m = name.match(/^(\d{4})_(\d{2})_(\d{2})_(\d{2})(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}  ${m[4]}:${m[5]}`;
+  return name;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════════════════════════════════════ */
+loadAll();
+</script>
+</body>
+</html>

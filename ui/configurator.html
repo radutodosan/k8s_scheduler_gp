@@ -60,7 +60,14 @@ body {
 }
 .app-header h1 { font-size: 1.25rem; font-weight: 600; }
 .app-header h1 span { color: var(--primary); }
-.header-actions { display: flex; gap: 8px; align-items: center; }
+.header-nav { display: flex; gap: 8px; align-items: center; }
+.nav-link {
+  padding: 4px 12px; border-radius: 6px; text-decoration: none;
+  font-size: .85rem; border: 1px solid var(--border);
+  color: var(--text); background: var(--surface2); transition: all .15s;
+}
+.nav-link:hover { border-color: var(--primary); color: var(--primary); }
+.nav-link.active { background: var(--primary); color: #fff; border-color: var(--primary); }
 
 /* Theme toggle */
 .theme-toggle {
@@ -468,18 +475,11 @@ body { padding-bottom: 56px; } /* space for status bar */
 }
 .estimate-box strong { color: var(--text); }
 </style>
+<script src="/shared.js"></script>
+<script>initTheme();</script>
 </head>
 <body>
-
-<!-- ═══════════════════════════════════════════════════════════════════
-     HEADER
-     ═══════════════════════════════════════════════════════════════════ -->
-<header class="app-header">
-  <h1>⚙️ <span>K8s GP Scheduler</span> — Configurator</h1>
-  <div class="header-actions">
-    <button class="theme-toggle" onclick="toggleTheme()" title="Schimbă tema">🌙 Temă</button>
-  </div>
-</header>
+<script>initNavbar('configurator');</script>
 
 <div class="container">
 
@@ -1057,22 +1057,6 @@ let nodeTemplates = [
   { count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0, taints: '', labels: '' }
 ];
 let validationErrors = [];
-
-/* ── Theme ──────────────────────────────────────────────────────────── */
-function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme');
-  const next = current === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  document.querySelector('.theme-toggle').textContent = next === 'dark' ? '☀️ Temă' : '🌙 Temă';
-  localStorage.setItem('theme', next);
-}
-(function initTheme() {
-  const saved = localStorage.getItem('theme');
-  if (saved === 'dark') {
-    document.documentElement.setAttribute('data-theme', 'dark');
-    document.querySelector('.theme-toggle').textContent = '☀️ Temă';
-  }
-})();
 
 /* ── Tabs ───────────────────────────────────────────────────────────── */
 function switchTab(id) {

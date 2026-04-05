@@ -24,13 +24,18 @@ The system includes:
 - **Pod anti-affinity** — pods with the same affinity key are spread across nodes
 - **Variable arrival patterns** — workload generator supports constant, diurnal, and bursty Poisson rates
 - **Workload profiles** — 6 realistic archetypes (web_serving, ai_training, ci_cd, batch_processing, microservices, mixed) with per-profile resource ranges, priorities, and scheduling parameters
+- **GPU resources** — pods can request GPUs; nodes expose GPU capacity; GP terminals include `POD_GPU_REQ`, `NODE_GPU_AVAIL`, `CLUSTER_GPU_UTIL`
 - **Replica groups** — pods can belong to a replica group (deployment/ReplicaSet), enabling co-location awareness
+- **NSGA-II multi-objective** evolution (optional) — Pareto-front of wait-time vs resource-waste vs failure-count
+- **GP rule simplification** — algebraic simplification of evolved expression trees for interpretability
+- **Cross-profile comparison** — experiment group running the same GP config across all workload profiles
 - **Configuration validation** — all config dataclasses expose `validate()` methods with range checks, probability constraints, and cross-field consistency
 - **Workload generator** producing realistic synthetic scenarios (Poisson arrivals, bursts, replica groups)
 - **Gantt chart visualisation** of pod scheduling timelines per strategy
 - **Metrics pipeline** evaluating wait time (including P50/P90/P95/P99 percentiles), resource utilisation, fairness, preemption counts, scheduling attempt counts, and rejection rates with timeline
 - **Experiment framework** for systematic sweeps across engine, scale, fitness weights, GP params, and dynamics
 - **Analysis module** generating comparison tables, convergence plots, box plots, and statistical summaries
+- **Web UI** — interactive configurator (YAML editor) and results dashboard served by a built-in HTTP server
 
 ## Quick Start
 
@@ -79,13 +84,29 @@ python run_experiments.py --list
 python analysis.py --input tmp/results/experiments
 ```
 
+### Launch the Web UI
+
+```bash
+# Starts the built-in server (opens browser automatically)
+python ui/server.py
+
+# Custom port, no auto-open
+python ui/server.py --port 9090 --no-browser
+```
+
+Routes:
+- `http://localhost:8050/` — Results Dashboard
+- `http://localhost:8050/configurator` — YAML Configurator
+
+See [`docs/ui.md`](docs/ui.md) for detailed UI documentation.
+
 ### Run tests
 
 ```bash
 pytest tests/ -v
 ```
 
-**511 tests** covering: models, simulator, scheduling, GP engines (DEAP + gplearn), baselines, workload generator, workload profiles, metrics (including wait-time percentiles, scheduling attempts, preemption tracking), config validation, dynamic instances, visualisation (Gantt, resource timelines, wait-time distributions, free resources, utilization variance), node failure dynamics (off/reschedule/kill modes, restart overhead), taints/tolerations, labels/selectors, priority preemption, requests vs limits, OOM kill, anti-affinity, burst arrival patterns, replica groups, experiment framework, analysis, statistical hypothesis tests, rule interpretability, resource monitoring, and a full integration pipeline.
+**520 tests** covering: models, simulator, scheduling, GP engines (DEAP + gplearn), baselines, workload generator, workload profiles, GPU resources, metrics (including wait-time percentiles, scheduling attempts, preemption tracking), config validation, dynamic instances, visualisation (Gantt, resource timelines, wait-time distributions, free resources, utilization variance), node failure dynamics (off/reschedule/kill modes, restart overhead), taints/tolerations, labels/selectors, priority preemption, requests vs limits, OOM kill, anti-affinity, burst arrival patterns, replica groups, NSGA-II multi-objective, rule simplification, cross-profile comparison, experiment framework, analysis, statistical hypothesis tests, rule interpretability, resource monitoring, and a full integration pipeline.
 
 ## Project Structure
 
@@ -99,8 +120,14 @@ k8s_scheduler_gp/
 ├── README.md                   # This file
 ├── .gitignore
 │
+├── ui/                         # Web UI (configurator + results dashboard)
+│   ├── server.py               #   HTTP server with REST API
+│   ├── configurator.html       #   YAML configuration editor
+│   └── dashboard.html          #   Interactive results viewer
+│
 ├── docs/                       # Documentation
 │   ├── ARCHITECTURE.md         #   Detailed internal documentation
+│   ├── ui.md                   #   Web UI documentation
 │   └── analiza_gp_proiect.md   #   GP project analysis
 │
 ├── config/                     # Experiment configuration
@@ -192,7 +219,7 @@ All configuration dataclasses (`ClusterConfig`, `WorkloadConfig`, `GPConfig`, `F
 1. **Workload Generator** produces a set of pods with arrival times, resource requests, and priorities
 2. **Simulation Engine** processes events chronologically (pod arrivals, completions, scheduling cycles)
 3. At each **scheduling cycle**, the pending queue is processed: for each pod, the **scheduling strategy** scores all feasible nodes and picks the best
-4. **GP-evolved rules** are expression trees that compute `Score(pod, node)` from 28 Kubernetes-specific terminals (CPU/mem requests, pod duration, node utilisation, CPU/MEM imbalance, look-ahead free ratios, queue depth, pending pressure, cluster utilisation std-dev, cluster health ratio, overcommit ratio, affinity conflict, taint count, preemptable count, replica group co-location, namespace pending ratio, etc.)
+4. **GP-evolved rules** are expression trees that compute `Score(pod, node)` from 31 Kubernetes-specific terminals (CPU/mem/GPU requests, pod duration, node utilisation, GPU availability, CPU/MEM imbalance, look-ahead free ratios, queue depth, pending pressure, cluster utilisation std-dev, cluster GPU utilisation, cluster health ratio, overcommit ratio, affinity conflict, taint count, preemptable count, replica group co-location, namespace pending ratio, etc.)
 5. **Two GP engines** are available:
    - **DEAP** (default): simulation-based fitness — rules are directly optimised via simulation. Includes compiled-tree caching for evaluation speedup and parsimony pressure for bloat control.
    - **gplearn**: regression-based — rules are learned from labeled scheduling data generated by a configurable reference strategy (default: LeastAllocated)
