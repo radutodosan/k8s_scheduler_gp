@@ -187,6 +187,13 @@ class SimulationEngine:
         # Record simulation duration for throughput calculation
         self._collector._metrics.simulation_duration = self._current_time
 
+        # Compute total infrastructure cost: Σ(cost_per_hour × uptime_hours)
+        sim_hours = self._current_time / 3600.0 if self._current_time > 0 else 0.0
+        total_cost = 0.0
+        for node in self._cluster.nodes.values():
+            total_cost += node.cost_per_hour * sim_hours
+        self._collector._metrics.total_cost = total_cost
+
         logger.info(
             "Simulation finished at t=%.2f  scheduled=%d rejected=%d completed=%d",
             self._current_time,

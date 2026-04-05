@@ -21,7 +21,10 @@ from workload.profiles import (
 
 class TestProfileDefinitions:
     def test_all_profiles_present(self):
-        expected = {"web_serving", "ai_training", "ci_cd", "batch_processing", "microservices"}
+        expected = {
+            "web_serving", "ai_training", "ci_cd", "batch_processing",
+            "microservices", "spike", "gradual_ramp", "chaos_monkey",
+        }
         assert expected == set(PROFILES.keys())
 
     def test_profile_names_includes_mixed(self):

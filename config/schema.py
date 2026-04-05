@@ -151,7 +151,8 @@ class WorkloadConfig:
     # ── Valid choices ────────────────────────────────────────────────
     VALID_ARRIVAL_PATTERNS = ("constant", "diurnal", "bursty")
     VALID_PROFILES = ("", "web_serving", "ai_training", "ci_cd",
-                      "batch_processing", "microservices", "mixed")
+                      "batch_processing", "microservices", "mixed",
+                      "spike", "gradual_ramp", "chaos_monkey")
 
     def validate(self) -> None:
         _check_positive("WorkloadConfig.total_pods", self.total_pods)

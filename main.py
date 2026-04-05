@@ -26,6 +26,7 @@ from metrics.collector import SchedulingMetrics
 from metrics.reporter import MetricsReporter
 from models.pod import Pod
 from scheduling.balanced_allocation import BalancedAllocationStrategy
+from scheduling.bin_packing import BinPackingStrategy
 from scheduling.first_fit import FirstFitStrategy
 from scheduling.gp_strategy import GPSchedulingStrategy
 from scheduling.least_allocated import LeastAllocatedStrategy
@@ -299,6 +300,7 @@ def main() -> None:
         LeastAllocatedStrategy(),
         MostAllocatedStrategy(),
         BalancedAllocationStrategy(),
+        BinPackingStrategy(),
     ]
 
     for strategy in baselines:

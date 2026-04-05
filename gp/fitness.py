@@ -7,6 +7,8 @@ and returns a scalar fitness value (lower is better).
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any, List, Optional, Tuple
 
 from config.schema import ClusterConfig, DynamicsConfig, FitnessWeights, WorkloadConfig
@@ -18,6 +20,59 @@ from simulator.engine import SimulationEngine
 from workload.generator import IWorkloadGenerator
 
 logger = logging.getLogger(__name__)
+
+
+# ── Top-level worker for multiprocessing (must be picklable) ─────────
+
+def _evaluate_worker(args: tuple) -> float:
+    """Evaluate a single training instance in a worker process.
+
+    Reconstructs a minimal DEAP GP individual from its expression string,
+    runs a simulation, and returns the scalar fitness score.
+    """
+    (
+        expr_str, pods, cluster_config, weights, schedule_interval,
+        max_pending_retries, dynamics_config, base_seed, instance_index,
+        engine_name, terminal_names,
+    ) = args
+
+    from gp.deap_engine import DeapGeneticEngine
+    from gp.primitives import TERMINAL_NAMES
+
+    # Rebuild a lightweight GP engine in this worker
+    engine = DeapGeneticEngine()
+    t_names = terminal_names or list(TERMINAL_NAMES)
+    engine.setup(terminal_names=t_names)
+
+    # Parse the expression string back into a DEAP individual
+    from deap import gp as deap_gp, creator
+    individual = deap_gp.PrimitiveTree.from_string(expr_str, engine._pset)
+
+    strategy = GPSchedulingStrategy(engine, individual)
+    failure_seed = base_seed + instance_index * 7919
+    sim = SimulationEngine(
+        strategy=strategy,
+        cluster_config=cluster_config,
+        schedule_interval=schedule_interval,
+        max_pending_retries=max_pending_retries,
+        dynamics_config=dynamics_config,
+        failure_seed=failure_seed,
+    )
+    sim.build_cluster()
+    sim.load_workload(pods)
+    sim.run()
+
+    m = sim.collector.get_metrics()
+
+    # Compute score inline (same formula as FitnessEvaluator._compute_score)
+    w = m.avg_wait_time
+    r = 1.0 - m.avg_cpu_utilization if m.avg_cpu_utilization > 0 else 1.0
+    f = (m.rejected_pods / m.total_pods) if m.total_pods > 0 else 1.0
+    return (
+        weights.alpha_wait_time * w
+        + weights.beta_resource_waste * r
+        + weights.gamma_failed_pods * f
+    )
 
 
 class FitnessEvaluator:
@@ -50,6 +105,7 @@ class FitnessEvaluator:
         base_seed: int = 42,
         num_instances: Optional[int] = None,
         dynamics_config: Optional[DynamicsConfig] = None,
+        n_workers: int = 1,
     ) -> None:
         self._gp_engine = gp_engine
         self._training_instances = training_instances
@@ -67,6 +123,9 @@ class FitnessEvaluator:
 
         # Node failure dynamics
         self._dynamics_config = dynamics_config
+
+        # Parallel evaluation
+        self._n_workers = min(n_workers, os.cpu_count() or 1)
 
         if self._dynamic and (self._generator is None or self._workload_config is None):
             raise ValueError(
@@ -97,13 +156,44 @@ class FitnessEvaluator:
         """Fitness function signature expected by IGeneticEngine.train().
 
         Returns a scalar fitness (lower is better).
+        When n_workers > 1, training instances are evaluated in parallel
+        using a process pool.
         """
-        scores: List[float] = []
+        if self._n_workers > 1 and len(self._training_instances) > 1:
+            return self._evaluate_parallel(individual)
 
+        scores: List[float] = []
         for idx, instance_pods in enumerate(self._training_instances):
             metrics = self._evaluate_single(individual, instance_pods, instance_index=idx)
             score = self._compute_score(metrics)
             scores.append(score)
+
+        return sum(scores) / len(scores) if scores else float("inf")
+
+    def _evaluate_parallel(self, individual: Any) -> float:
+        """Evaluate training instances across multiple processes."""
+        expr_str = str(individual)
+        args = [
+            (
+                expr_str,
+                [self._copy_pod(p) for p in instance_pods],
+                self._cluster_config,
+                self._weights,
+                self._schedule_interval,
+                self._max_pending_retries,
+                self._dynamics_config,
+                self._base_seed,
+                idx,
+                self._gp_engine.name,
+                list(self._gp_engine._terminal_names)
+                if hasattr(self._gp_engine, "_terminal_names")
+                else None,
+            )
+            for idx, instance_pods in enumerate(self._training_instances)
+        ]
+
+        with ProcessPoolExecutor(max_workers=self._n_workers) as pool:
+            scores = list(pool.map(_evaluate_worker, args))
 
         return sum(scores) / len(scores) if scores else float("inf")
 

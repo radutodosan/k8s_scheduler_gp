@@ -35,6 +35,9 @@ class SchedulingMetrics:
     # Throughput tracking
     simulation_duration: float = 0.0
 
+    # Cost tracking: Σ(node.cost_per_hour × uptime_hours) for all nodes
+    total_cost: float = 0.0
+
     total_wait_time: float = 0.0
     per_pod_wait_times: List[float] = field(default_factory=list)
     rejection_reasons: Dict[str, int] = field(default_factory=dict)
@@ -129,6 +132,13 @@ class SchedulingMetrics:
             return 0.0
         return sum(self.scheduling_attempts.values()) / len(self.scheduling_attempts)
 
+    @property
+    def cost_per_pod(self) -> float:
+        """Average infrastructure cost per completed pod."""
+        if self.completed_pods == 0:
+            return 0.0
+        return self.total_cost / self.completed_pods
+
     def to_dict(self) -> Dict[str, object]:
         """Flat dictionary suitable for CSV / JSON export."""
         return {
@@ -150,6 +160,8 @@ class SchedulingMetrics:
             "preemption_count": self.preemption_count,
             "node_failure_count": self.node_failure_count,
             "avg_scheduling_attempts": round(self.avg_scheduling_attempts, 2),
+            "total_cost": round(self.total_cost, 4),
+            "cost_per_pod": round(self.cost_per_pod, 4),
             "rejection_reasons": dict(self.rejection_reasons),
         }
 

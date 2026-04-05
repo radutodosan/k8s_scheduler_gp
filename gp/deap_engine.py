@@ -327,35 +327,43 @@ class DeapGeneticEngine(IGeneticEngine):
     # ── Internal helpers ─────────────────────────────────────────────
 
     def _build_pset(self, func_names: List[str]) -> None:
-        """Register functions and terminals with DEAP's PrimitiveSet."""
+        """Register functions and terminals with DEAP's PrimitiveSetTyped.
+
+        All terminals and functions operate on a single ``float`` type,
+        which keeps the tree grammar simple while still enforcing type
+        safety via DEAP's typed GP infrastructure.  This prevents
+        invalid tree shapes (e.g. wrong arity) and makes crossover/
+        mutation type-safe.
+        """
         n_terminals = len(self._terminal_names)
-        pset = gp.PrimitiveSet("SCORING_RULE", arity=n_terminals)
+        in_types = [float] * n_terminals
+        pset = gp.PrimitiveSetTyped("SCORING_RULE", in_types=in_types, ret_type=float)
 
         # Rename arguments to match terminal names
         for i, tname in enumerate(self._terminal_names):
             pset.renameArguments(**{f"ARG{i}": tname})
 
-        # Register functions
+        # Register typed functions (all float → float)
         func_map = {
-            "add": (add, 2),
-            "sub": (sub, 2),
-            "mul": (mul, 2),
-            "protected_div": (protected_div, 2),
-            "neg": (neg, 1),
-            "min": (safe_min, 2),
-            "max": (safe_max, 2),
-            "if_positive": (if_positive, 3),
+            "add":           (add, [float, float], float),
+            "sub":           (sub, [float, float], float),
+            "mul":           (mul, [float, float], float),
+            "protected_div": (protected_div, [float, float], float),
+            "neg":           (neg, [float], float),
+            "min":           (safe_min, [float, float], float),
+            "max":           (safe_max, [float, float], float),
+            "if_positive":   (if_positive, [float, float, float], float),
         }
         for fname in func_names:
             if fname in func_map:
-                fn, arity = func_map[fname]
-                pset.addPrimitive(fn, arity, name=fname)
+                fn, arg_types, ret_type = func_map[fname]
+                pset.addPrimitive(fn, arg_types, ret_type, name=fname)
 
         # Ephemeral random constant (ERC) in [-5, 5]
         def _erc_generator():
             return round(random.uniform(-5.0, 5.0), 2)
 
-        pset.addEphemeralConstant("ERC", _erc_generator)
+        pset.addEphemeralConstant("ERC", _erc_generator, ret_type=float)
 
         self._pset = pset
 
