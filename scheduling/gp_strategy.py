@@ -63,13 +63,20 @@ class GPSchedulingStrategy(ISchedulingStrategy):
 
         best_node_id: Optional[str] = None
         best_score = float("-inf")
+        best_resource_fit = float("-inf")
 
         for node in feasible:
             terminal_values = extract_terminal_values(pod, node, cluster, current_time)
             score = self._engine.evaluate_individual(self._individual, terminal_values)
+            resource_fit = terminal_values.get("RESOURCE_FIT", 0.0)
 
             if score > best_score:
                 best_score = score
+                best_resource_fit = resource_fit
+                best_node_id = node.node_id
+            elif abs(score - best_score) <= 1e-12 and resource_fit > best_resource_fit:
+                # Stable tie-breaker for near-constant expressions.
+                best_resource_fit = resource_fit
                 best_node_id = node.node_id
 
         return best_node_id

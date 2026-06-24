@@ -118,7 +118,7 @@ class TestExtractTerminalValues:
         cluster.add_node(node)
 
         vals = extract_terminal_values(pod, node, cluster, current_time=5.0)
-        assert vals["POD_WAIT_TIME"] == pytest.approx(4.0)
+        assert vals["POD_WAIT_TIME"] == pytest.approx(4.0 / 5.0)
 
     def test_resource_fit_clamped(self):
         """RESOURCE_FIT should be in [0, 1] even for oversized pods."""
@@ -136,7 +136,7 @@ class TestExtractTerminalValues:
         cluster = ClusterState()
         cluster.add_node(node)
         vals = extract_terminal_values(pod, node, cluster, current_time=0.0)
-        assert vals["POD_DURATION"] == pytest.approx(10.5)
+        assert vals["POD_DURATION"] == pytest.approx(0.105)
 
     def test_cpu_mem_imbalance(self):
         """Imbalance should equal |cpu_util - mem_util|."""
@@ -443,6 +443,40 @@ class TestFitnessEvaluator:
         m = metrics_list[0]
         assert m.total_pods == 3
         assert m.scheduled_pods + m.rejected_pods == m.total_pods
+
+    def test_mean_minus_std_aggregation_returns_finite(self, evaluator_setup):
+        engine, _ = evaluator_setup
+        pods_a = [
+            Pod(pod_id=f"a-{i}", cpu_request=0.4, mem_request=256.0, arrival_time=float(i), duration=4.0)
+            for i in range(4)
+        ]
+        pods_b = [
+            Pod(pod_id=f"b-{i}", cpu_request=1.0, mem_request=1024.0, arrival_time=float(i), duration=10.0)
+            for i in range(4)
+        ]
+        evaluator = FitnessEvaluator(
+            gp_engine=engine,
+            training_instances=[pods_a, pods_b],
+            cluster_config=ClusterConfig(
+                node_templates=[NodeConfig(count=2, cpu_capacity=4.0, mem_capacity=8192.0)]
+            ),
+            fitness_weights=FitnessWeights(),
+            aggregation_mode="mean_minus_std",
+            std_penalty=0.25,
+        )
+        result = engine.train(fitness_function=evaluator, seed=42)
+        assert math.isfinite(result.best_fitness)
+
+    def test_invalid_aggregation_mode_raises(self, evaluator_setup):
+        engine, _ = evaluator_setup
+        with pytest.raises(ValueError, match="aggregation_mode"):
+            FitnessEvaluator(
+                gp_engine=engine,
+                training_instances=[[]],
+                cluster_config=ClusterConfig(),
+                fitness_weights=FitnessWeights(),
+                aggregation_mode="median",
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════

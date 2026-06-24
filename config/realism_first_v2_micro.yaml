@@ -1,0 +1,130 @@
+﻿# Micro benchmark profile derived from realism_first_v2
+name: "realism_first_v2_micro"
+seed: 42
+num_training_instances: 2
+num_validation_instances: 1
+num_test_instances: 2
+dynamic_instances: true
+output_dir: "tmp/results"
+output_format: "csv"
+
+cluster:
+  node_templates:
+    - count: 6
+      cpu_capacity: 8.0
+      mem_capacity: 16384.0
+      gpu_capacity: 0.0
+      cost_per_hour: 1.0
+    - count: 2
+      cpu_capacity: 16.0
+      mem_capacity: 32768.0
+      gpu_capacity: 2.0
+      cost_per_hour: 2.5
+      taints: ["gpu"]
+
+workload:
+  total_pods: 70
+  arrival_rate: 1.0
+  burst_probability: 0.10
+  burst_size_min: 2
+  burst_size_max: 6
+  cpu_range: [0.1, 2.0]
+  mem_range: [128.0, 3072.0]
+  gpu_range: [0.0, 1.0]
+  gpu_probability: 0.10
+  duration_range: [5.0, 40.0]
+  priority_weights:
+    low: 0.45
+    medium: 0.35
+    high: 0.20
+  qos_weights:
+    best_effort: 0.30
+    burstable: 0.45
+    guaranteed: 0.25
+  namespaces: ["default", "production", "batch", "ml"]
+  possible_taints: ["gpu", "spot", "dedicated"]
+  taint_toleration_probability: 0.35
+  possible_labels:
+    disktype: ["ssd", "hdd"]
+    zone: ["zone-a", "zone-b"]
+  node_selector_probability: 0.20
+  limit_ratio_min: 1.0
+  limit_ratio_max: 1.9
+  limit_probability: 0.45
+  possible_anti_affinity_keys: ["app-web", "app-api", "app-worker", "app-db"]
+  anti_affinity_probability: 0.30
+  arrival_pattern: "diurnal"
+  diurnal_peak_rate: 2.3
+  diurnal_trough_rate: 0.55
+  bursty_spike_multiplier: 3.8
+  bursty_spike_probability: 0.12
+  profile: "mixed"
+  profile_mix:
+    web_serving: 0.28
+    ai_training: 0.12
+    ci_cd: 0.15
+    batch_processing: 0.20
+    microservices: 0.25
+
+gp:
+  engine: "deap"
+  population_size: 28
+  n_generations: 8
+  tournament_size: 4
+  crossover_prob: 0.82
+  mutation_prob: 0.18
+  max_tree_depth: 7
+  elitism_ratio: 0.08
+  parsimony_coefficient: 0.016
+  n_workers: 1
+  fitness_aggregation: "mean_minus_std"
+  fitness_std_penalty: 0.45
+  validation_hof_size: 6
+  multi_objective: false
+  terminal_mandatory:
+    - "POD_CPU_REQ"
+    - "POD_MEM_REQ"
+    - "POD_GPU_REQ"
+    - "POD_PRIORITY"
+    - "POD_WAIT_TIME"
+    - "NODE_CPU_AVAIL"
+    - "NODE_MEM_AVAIL"
+    - "NODE_GPU_AVAIL"
+    - "NODE_CPU_UTIL"
+    - "NODE_MEM_UTIL"
+    - "NODE_CPU_FREE_AFTER"
+    - "NODE_MEM_FREE_AFTER"
+    - "PENDING_COUNT"
+    - "PENDING_PRESSURE"
+    - "RESOURCE_FIT"
+    - "NODE_PREEMPTABLE_COUNT"
+    - "NODE_OVERCOMMIT_RATIO"
+    - "CLUSTER_HEALTHY_RATIO"
+  terminal_optional_enabled:
+    - "POD_QOS"
+    - "POD_DURATION"
+    - "NODE_TAINT_COUNT"
+    - "NODE_AFFINITY_CONFLICT"
+    - "NODE_POD_COUNT"
+    - "NODE_CPU_MEM_IMBALANCE"
+    - "CLUSTER_CPU_UTIL"
+    - "CLUSTER_MEM_UTIL"
+    - "CLUSTER_GPU_UTIL"
+    - "CLUSTER_UTIL_STD"
+
+fitness:
+  alpha_wait_time: 0.12
+  beta_resource_waste: 0.16
+  gamma_failed_pods: 0.22
+  delta_evicted_pods: 0.18
+  epsilon_preemptions: 0.14
+  eta_churn: 0.14
+  zeta_scheduling_attempts: 0.04
+
+dynamics:
+  failure_mode: "reschedule"
+  failure_rate: 2
+  recovery_time_min: 10.0
+  recovery_time_max: 30.0
+  restart_overhead_min: 2.0
+  restart_overhead_max: 8.0

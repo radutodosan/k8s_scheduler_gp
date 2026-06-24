@@ -40,7 +40,7 @@ class RoundRobinStrategy(ISchedulingStrategy):
             node_id = self._node_ids[self._index % n]
             self._index = (self._index + 1) % n
             node = cluster.nodes[node_id]
-            if node.can_fit(pod):
+            if node.is_available and node.can_fit(pod):
                 return node_id
 
         return None

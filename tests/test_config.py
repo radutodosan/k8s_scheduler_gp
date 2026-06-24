@@ -13,6 +13,7 @@ from config.schema import (
     NodeConfig,
     WorkloadConfig,
 )
+from gp.primitives import TERMINAL_NAMES
 
 
 class TestExperimentConfigDefaults:
@@ -20,6 +21,7 @@ class TestExperimentConfigDefaults:
         cfg = ExperimentConfig()
         assert cfg.seed == 42
         assert cfg.num_training_instances == 5
+        assert cfg.num_validation_instances == 0
         assert cfg.output_format == "csv"
         assert cfg.dynamic_instances is False
         assert isinstance(cfg.cluster, ClusterConfig)
@@ -84,7 +86,16 @@ dynamic_instances: true
 class TestFitnessWeights:
     def test_defaults_sum_to_one(self):
         w = FitnessWeights()
-        assert w.alpha_wait_time + w.beta_resource_waste + w.gamma_failed_pods == pytest.approx(1.0)
+        total = (
+            w.alpha_wait_time
+            + w.beta_resource_waste
+            + w.gamma_failed_pods
+            + w.delta_evicted_pods
+            + w.epsilon_preemptions
+            + getattr(w, "eta_churn", 0.0)
+            + w.zeta_scheduling_attempts
+        )
+        assert total == pytest.approx(1.0)
 
 
 class TestNodeConfig:
@@ -181,6 +192,43 @@ class TestGPConfigValidation:
         with pytest.raises(ConfigValidationError, match="population_size"):
             cfg.validate()
 
+    def test_invalid_fitness_aggregation(self):
+        cfg = GPConfig(fitness_aggregation="median")
+        with pytest.raises(ConfigValidationError, match="fitness_aggregation"):
+            cfg.validate()
+
+    def test_invalid_n_workers(self):
+        cfg = GPConfig(n_workers=0)
+        with pytest.raises(ConfigValidationError, match="n_workers"):
+            cfg.validate()
+
+    def test_selected_terminals_defaults_to_all(self):
+        cfg = GPConfig()
+        assert cfg.selected_terminals() == list(TERMINAL_NAMES)
+
+    def test_selected_terminals_preserves_canonical_order(self):
+        cfg = GPConfig(
+            terminal_mandatory=["NODE_CPU_AVAIL", "POD_CPU_REQ"],
+            terminal_optional_enabled=["RESOURCE_FIT", "POD_MEM_REQ"],
+        )
+        cfg.validate()
+        expected = [
+            name
+            for name in TERMINAL_NAMES
+            if name in {"NODE_CPU_AVAIL", "POD_CPU_REQ", "RESOURCE_FIT", "POD_MEM_REQ"}
+        ]
+        assert cfg.selected_terminals() == expected
+
+    def test_invalid_mandatory_terminal_name(self):
+        cfg = GPConfig(terminal_mandatory=["NOT_A_REAL_TERMINAL"])
+        with pytest.raises(ConfigValidationError, match="Unknown mandatory terminal"):
+            cfg.validate()
+
+    def test_invalid_optional_terminal_name(self):
+        cfg = GPConfig(terminal_optional_enabled=["NOT_A_REAL_TERMINAL"])
+        with pytest.raises(ConfigValidationError, match="Unknown optional terminal"):
+            cfg.validate()
+
 
 class TestFitnessWeightsValidation:
     def test_defaults_pass(self):
@@ -236,6 +284,11 @@ workload:
     def test_invalid_output_format(self):
         cfg = ExperimentConfig(output_format="xml")
         with pytest.raises(ConfigValidationError, match="output_format"):
+            cfg.validate()
+
+    def test_invalid_validation_instances(self):
+        cfg = ExperimentConfig(num_validation_instances=-1)
+        with pytest.raises(ConfigValidationError, match="num_validation_instances"):
             cfg.validate()
 
     def test_full_yaml_configs_pass(self):

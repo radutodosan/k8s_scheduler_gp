@@ -37,10 +37,10 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "nodes": 3,
         "cpu_capacity": 4.0,
         "mem_capacity": 8192.0,
-        "num_training_instances": 2,
+        "num_training_instances": 3,
         "num_test_instances": 2,
-        "gp_population_size": 30,
-        "gp_n_generations": 8,
+        "gp_population_size": 50,
+        "gp_n_generations": 20,
     },
     "medium": {
         "description": "Standard experiment (~5 min)",

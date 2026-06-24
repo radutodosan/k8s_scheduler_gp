@@ -13,9 +13,8 @@ The default Kubernetes scheduler uses static, hand-tuned scoring rules (LeastAll
 The system includes:
 
 - **Discrete-event simulator** modelling a Kubernetes cluster (pods, nodes, resource accounting)
-- **GP engine** (DEAP) that evolves scheduling rules as expression trees
-- **Second GP engine** (gplearn) using symbolic regression for library comparison
-- **Baseline strategies** (RoundRobin, FirstFit, LeastAllocated, etc.) for comparison
+- **GP engine** (DEAP) that evolves scheduling rules as interpretable expression trees
+- **Baseline strategies** (Random, RoundRobin, FirstFit, LeastAllocated, MostAllocated, BalancedAllocation, BinPacking) for comparison
 - **Dynamic node failures** with three modes (off / reschedule / kill), pod eviction, restart overhead, and remaining-duration tracking
 - **Taints & tolerations** — nodes can be tainted, pods must tolerate taints to be placed
 - **Labels & node selectors** — pods can request specific node labels for constrained placement
@@ -26,14 +25,13 @@ The system includes:
 - **Workload profiles** — 6 realistic archetypes (web_serving, ai_training, ci_cd, batch_processing, microservices, mixed) with per-profile resource ranges, priorities, and scheduling parameters
 - **GPU resources** — pods can request GPUs; nodes expose GPU capacity; GP terminals include `POD_GPU_REQ`, `NODE_GPU_AVAIL`, `CLUSTER_GPU_UTIL`
 - **Replica groups** — pods can belong to a replica group (deployment/ReplicaSet), enabling co-location awareness
-- **NSGA-II multi-objective** evolution (optional) — Pareto-front of wait-time vs resource-waste vs failure-count
-- **GP rule simplification** — algebraic simplification of evolved expression trees for interpretability
+- **GP rule simplification** — algebraic simplification of evolved expression trees for interpretability (NSGA-II multi-objective available in code but not used in current experiments)
 - **Cross-profile comparison** — experiment group running the same GP config across all workload profiles
 - **Configuration validation** — all config dataclasses expose `validate()` methods with range checks, probability constraints, and cross-field consistency
 - **Workload generator** producing realistic synthetic scenarios (Poisson arrivals, bursts, replica groups)
 - **Gantt chart visualisation** of pod scheduling timelines per strategy
 - **Metrics pipeline** evaluating wait time (including P50/P90/P95/P99 percentiles), resource utilisation, fairness, preemption counts, scheduling attempt counts, and rejection rates with timeline
-- **Experiment framework** for systematic sweeps across engine, scale, fitness weights, GP params, and dynamics
+- **Experiment framework** for systematic sweeps across engine, scale, fitness weights, GP params, dynamics, NSGA-II, and workload profiles
 - **Analysis module** generating comparison tables, convergence plots, box plots, and statistical summaries
 - **Web UI** — interactive configurator (YAML editor) and results dashboard served by a built-in HTTP server
 
@@ -68,11 +66,17 @@ python main.py --config config/my_experiment.yaml --gantt
 ### Run experiment sweeps (Chapter 5)
 
 ```bash
-# Run all 14 experiments (full mode)
+# Run all 19 experiments (full mode: pop=100, gen=30, seeds=5)
 python run_experiments.py
 
-# Quick validation (small parameters)
+# Quick validation (small parameters: pop=20, gen=5, seeds=2)
 python run_experiments.py --quick
+
+# Medium sweep (pop=80, gen=30, seeds=3)
+python run_experiments.py --medium
+
+# Overnight run (pop=120, gen=40, seeds=5, n_restarts=1, fitness_aggregation=mean_minus_std, ~6.6h)
+python run_experiments.py --overnight
 
 # Run a single experiment group
 python run_experiments.py --quick --group engine
@@ -106,7 +110,7 @@ See [`docs/ui.md`](docs/ui.md) for detailed UI documentation.
 pytest tests/ -v
 ```
 
-**520 tests** covering: models, simulator, scheduling, GP engines (DEAP + gplearn), baselines, workload generator, workload profiles, GPU resources, metrics (including wait-time percentiles, scheduling attempts, preemption tracking), config validation, dynamic instances, visualisation (Gantt, resource timelines, wait-time distributions, free resources, utilization variance), node failure dynamics (off/reschedule/kill modes, restart overhead), taints/tolerations, labels/selectors, priority preemption, requests vs limits, OOM kill, anti-affinity, burst arrival patterns, replica groups, NSGA-II multi-objective, rule simplification, cross-profile comparison, experiment framework, analysis, statistical hypothesis tests, rule interpretability, resource monitoring, and a full integration pipeline.
+**535 tests** collected by `pytest` covering: models, simulator, scheduling, GP engine (DEAP), all 7 baselines, workload generator, workload profiles, GPU resources, metrics (including wait-time percentiles, scheduling attempts, preemption tracking), config validation, dynamic instances, visualisation (Gantt, resource timelines, wait-time distributions, free resources, utilization variance, GP tree plots), node failure dynamics (off/reschedule/kill modes, restart overhead), taints/tolerations, labels/selectors, priority preemption, requests vs limits, OOM kill, anti-affinity, burst arrival patterns, replica groups, NSGA-II multi-objective, rule simplification, cross-profile comparison, experiment framework, analysis, statistical hypothesis tests, rule interpretability, resource monitoring, regression coverage, and a full integration pipeline.
 
 ## Project Structure
 
@@ -126,9 +130,14 @@ k8s_scheduler_gp/
 │   └── dashboard.html          #   Interactive results viewer
 │
 ├── docs/                       # Documentation
-│   ├── ARCHITECTURE.md         #   Detailed internal documentation
+│   ├── simulator.md            #   Simulator architecture and Kubernetes mapping
+│   ├── gp.md                   #   GP theory and implementation details
+│   ├── results.md              #   Metrics, experiments, analysis, statistics
+│   ├── tests.md                #   Test suite documentation
+│   ├── configurator.md         #   YAML schema and validation system
 │   ├── ui.md                   #   Web UI documentation
-│   └── analiza_gp_proiect.md   #   GP project analysis
+│   ├── visualization.md        #   Gantt/resource/GP-tree visualizations
+│   └── future_work.md          #   Future extensions and research directions
 │
 ├── config/                     # Experiment configuration
 │   ├── schema.py               #   ExperimentConfig dataclass + YAML loader + validation
@@ -153,19 +162,20 @@ k8s_scheduler_gp/
 │   ├── first_fit.py            #   First-fit baseline
 │   ├── least_allocated.py      #   Kubernetes-like least-allocated
 │   ├── most_allocated.py       #   Bin-packing (fill nodes first)
-│   └── balanced_allocation.py  #   Balance CPU/memory utilisation
+│   ├── balanced_allocation.py  #   Balance CPU/memory utilisation
+│   └── bin_packing.py          #   Explicit bin-packing baseline
 │
 ├── gp/                         # Genetic Programming engines
 │   ├── interface.py            #   IGeneticEngine (abstract interface)
 │   ├── primitives.py           #   Terminal and function definitions
 │   ├── deap_engine.py          #   DEAP-based GP engine (simulation-based fitness)
-│   ├── gplearn_engine.py       #   gplearn-based GP engine (regression-based)
 │   └── fitness.py              #   FitnessEvaluator (GP ↔ simulator bridge)
 │
 ├── workload/                   # Synthetic workload generation
 │   ├── generator.py            #   IWorkloadGenerator (abstract interface)
 │   ├── profiles.py             #   Workload profiles, validation, replica groups
-│   └── poisson_generator.py    #   PoissonWorkloadGenerator (Poisson, bursts)
+│   ├── poisson_generator.py    #   PoissonWorkloadGenerator (Poisson, bursts)
+│   └── trace_replay.py         #   Replay support for trace-driven workloads
 │
 ├── metrics/                    # Evaluation and reporting
 │   ├── collector.py            #   MetricsCollector (per-run)
@@ -174,7 +184,8 @@ k8s_scheduler_gp/
 │
 ├── visualization/              # Output visualisation
 │   ├── gantt.py                #   Gantt chart (pod timelines per node)
-│   └── resource_plots.py       #   Resource utilization time-series plots
+│   ├── resource_plots.py       #   Resource utilization time-series plots
+│   └── gp_tree.py              #   GP tree and Pareto front visualisation
 │
 └── tests/                      # Unit and integration tests
     ├── conftest.py             #   Shared fixtures (pods, nodes, clusters, configs)
@@ -184,16 +195,18 @@ k8s_scheduler_gp/
     ├── test_simulator.py       #   Event ordering, queue, SimulationEngine
     ├── test_scheduling.py      #   GPSchedulingStrategy
     ├── test_gp.py              #   Primitives, DeapEngine, FitnessEvaluator
-    ├── test_gplearn.py         #   GplearnEngine, ScoringCollector, integration
     ├── test_workload.py        #   PoissonWorkloadGenerator determinism
     ├── test_metrics.py         #   Collector, Reporter, CSV/JSON export
     ├── test_config.py          #   YAML loading, defaults
-    ├── test_gantt.py           #   Gantt chart generation and saving    ├── test_baselines.py        #   All 6 baseline strategies
-    ├── test_experiments.py      #   Experiment framework, analysis module
-    ├── test_statistical.py      #   Statistical tests, effect sizes, interpretability
-    ├── test_dynamics.py          #   Node failures, eviction, recovery, metrics
-    ├── test_resource_monitor.py  #   ResourceMonitor, snapshots, throughput
-    ├── test_resource_plots.py    #   Resource utilization plots
+    ├── test_gantt.py           #   Gantt chart generation and saving
+    ├── test_baselines.py       #   All 7 baseline strategies + contract tests
+    ├── test_experiments.py     #   Experiment framework, analysis module
+    ├── test_statistical.py     #   Statistical tests, effect sizes, interpretability
+    ├── test_dynamics.py        #   Node failures, eviction, recovery, metrics
+    ├── test_profiles.py        #   Workload profile generation and validation
+    ├── test_regression.py      #   Determinism and golden-output regression checks
+    ├── test_resource_monitor.py #  ResourceMonitor, snapshots, throughput
+    ├── test_resource_plots.py  #   Resource utilization plots
     └── test_integration.py     #   Full pipeline end-to-end
 ```
 
@@ -207,9 +220,10 @@ Key sections:
 |---------|----------|
 | `cluster` | Number and size of nodes |
 | `workload` | Pod arrival rates, resource distributions, burst settings, limits, anti-affinity, arrival patterns, **profile**, replica groups |
-| `gp` | Population size, generations, crossover/mutation rates, tree depth, **engine** (`deap` or `gplearn`) |
-| `fitness` | Weights α (wait time), β (resource waste), γ (failed pods) |
+| `gp` | Population size, generations, crossover/mutation rates, tree depth, `n_workers`, `fitness_aggregation` (`"mean"` or `"mean_minus_std"`), `fitness_std_penalty`, `validation_hof_size`, `n_restarts` (run GP N times independently, keep best), optional `multi_objective` (NSGA-II, available but not used in current experiments) |
+| `fitness` | Weights for wait time, resource waste, failed pods, evictions, preemptions, churn, and scheduling attempts; quality remains normalized in `[0, 1]` |
 | `dynamic_instances` | When `true`, training instances are regenerated each GP generation (prevents overfitting) |
+| `num_validation_instances` | Optional validation split used for DEAP hall-of-fame champion selection |
 | `dynamics` | Node failure injection: `failure_mode` (off/reschedule/kill), `failure_rate` (1–3), `recovery_time_min/max`, `restart_overhead_min/max` |
 
 All configuration dataclasses (`ClusterConfig`, `WorkloadConfig`, `GPConfig`, `FitnessWeights`, `DynamicsConfig`) expose a `validate()` method that checks value ranges, probabilities (\[0, 1\]), weight sums, cross-field consistency (e.g. `burst_size_min ≤ burst_size_max`), and enumerated choices. Call `config.validate()` before running experiments to catch errors early.
@@ -219,11 +233,9 @@ All configuration dataclasses (`ClusterConfig`, `WorkloadConfig`, `GPConfig`, `F
 1. **Workload Generator** produces a set of pods with arrival times, resource requests, and priorities
 2. **Simulation Engine** processes events chronologically (pod arrivals, completions, scheduling cycles)
 3. At each **scheduling cycle**, the pending queue is processed: for each pod, the **scheduling strategy** scores all feasible nodes and picks the best
-4. **GP-evolved rules** are expression trees that compute `Score(pod, node)` from 31 Kubernetes-specific terminals (CPU/mem/GPU requests, pod duration, node utilisation, GPU availability, CPU/MEM imbalance, look-ahead free ratios, queue depth, pending pressure, cluster utilisation std-dev, cluster GPU utilisation, cluster health ratio, overcommit ratio, affinity conflict, taint count, preemptable count, replica group co-location, namespace pending ratio, etc.)
-5. **Two GP engines** are available:
-   - **DEAP** (default): simulation-based fitness — rules are directly optimised via simulation. Includes compiled-tree caching for evaluation speedup and parsimony pressure for bloat control.
-   - **gplearn**: regression-based — rules are learned from labeled scheduling data generated by a configurable reference strategy (default: LeastAllocated)
-6. **Fitness** is evaluated by running the simulator on multiple training instances and combining wait time, resource waste, and failure count
+4. **GP-evolved rules** are expression trees that compute `Score(pod, node)` from a focused set of Kubernetes-specific terminals. 31 terminals are defined in total but only 17 are active by default (**CORE_17**: CPU/mem requests, pod wait time, pod duration, pod priority/QoS, node CPU/mem utilisation, node CPU/mem free-after, node taint count, node cost, node imbalance, pending pressure, cluster CPU/mem/GPU util, cluster health ratio). GPU-specific experiments add 3 extra terminals (CORE_20). The initial GP population is **seeded** with 11 baseline-derived expressions so evolution starts at LeastAllocated level and can only improve.
+5. **GP engine (DEAP)**: simulation-based fitness — rules are directly optimised via simulation. Includes compiled-tree caching for evaluation speedup and parsimony pressure for bloat control.
+6. **Fitness** is evaluated by running the simulator on multiple training instances and computing a normalised **quality score in [0, 1]** (higher = better): `quality = 1 − (α·Wₚ + β·R + γ·F + δ·E + ε·P + η·C + ζ·A)` where `Wₚ` = wait / (wait+1), `R` = `1 − mean(cpu_util, mem_util)`, `F` = rejection rate, `E` = eviction rate, `P` = preemption rate, `C` = churn rate, `A` = normalised scheduling-attempt cost
 7. **Metrics Reporter** exports per-run and aggregated results to CSV/JSON, including wait-time percentiles, preemption counts, and scheduling attempt statistics
 
 ## Node Failure Dynamics
@@ -316,21 +328,23 @@ All baselines are automatically evaluated on the test set alongside the GP-evolv
 | Random | `scheduling/random_strategy.py` | Uniform random among feasible nodes |
 | RoundRobin | `scheduling/round_robin.py` | Cyclic assignment, skips infeasible |
 | FirstFit | `scheduling/first_fit.py` | First node (sorted) with capacity |
-| LeastAllocated | `scheduling/least_allocated.py` | Node with most free resources (K8s default) |
-| MostAllocated | `scheduling/most_allocated.py` | Bin-packing: fill nodes before using new ones |
+| LeastAllocated | `scheduling/least_allocated.py` | Node with most free resources (K8s default style) |
+| MostAllocated | `scheduling/most_allocated.py` | Prefer fuller nodes to reduce fragmentation |
 | BalancedAllocation | `scheduling/balanced_allocation.py` | Minimise CPU/memory utilisation imbalance |
+| BinPacking | `scheduling/bin_packing.py` | Explicit packing-oriented baseline |
 | **GP-evolved** | `scheduling/gp_strategy.py` | Learned scoring function via genetic programming |
 
 ## Resource Utilization Plots
 
 Both `main.py` and `run_experiments.py` automatically capture per-node and cluster-level resource utilization time-series during simulation via the `ResourceMonitor`. Outputs include:
 
-- **`resource_timeline.json`** — full time-series: per-node CPU/MEM utilization, per-node free resources, pod counts, node availability, cluster aggregates, CPU utilization variance, pending queue depth, completed pod count
+- **`resource_timelines/*.json`** — full time-series per strategy: per-node CPU/MEM utilization, per-node free resources, pod counts, node availability, cluster aggregates, CPU utilization variance, pending queue depth, completed pod count
 - **`cluster_util.png`** — dual-axis cluster utilization plot (CPU + MEM fill, pending queue dashed)
-- **`strategy_comparison.png`** — overlaid CPU/MEM curves across all strategies (generated by `main.py`)
+- **`strategy_comparison.png`** — overlaid CPU/MEM curves across strategies when multiple monitors are available
 - **`wait_time_dist.png`** — histogram of per-pod wait times with P50/P90/P99 percentile markers
 - **`free_resources.png`** — dual-axis plot of free CPU (cores) and free MEM (MiB) over time
 - **`util_variance.png`** — CPU utilization variance over time (load-balance indicator)
+- **`gp_tree.png` / Pareto plots** — GP tree visualization and NSGA-II front projections when exported by analysis/visualization flows
 
 These visualizations correspond to dissertation section 5.7 (*Vizualizări: Utilizare resurse în timp*).
 

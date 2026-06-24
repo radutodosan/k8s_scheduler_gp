@@ -98,20 +98,20 @@ def sample_metadata() -> dict:
         "a1_deap": {
             "name": "a1_deap", "group": "engine", "engine": "deap",
             "best_fitness": 0.42,
-            "best_expression": "add(mul(POD_CPU, NODE_CPU_AVAIL), sub(RESOURCE_FIT, POD_MEM))",
+            "best_expression": "add(mul(POD_CPU_REQ, NODE_CPU_AVAIL), sub(RESOURCE_FIT, POD_MEM_REQ))",
             "population_size": 100, "n_generations": 30,
             "total_pods": 100, "node_count": 5,
             "alpha": 0.4, "beta": 0.3, "gamma": 0.3,
             "node_failures": False, "training_time_s": 5.0,
         },
-        "a2_gplearn": {
-            "name": "a2_gplearn", "group": "engine", "engine": "gplearn",
+        "b1_small": {
+            "name": "b1_small", "group": "scale", "engine": "deap",
             "best_fitness": 0.45,
-            "best_expression": "mul(NODE_CPU_AVAIL, add(POD_CPU, BALANCE_SCORE))",
-            "population_size": 100, "n_generations": 30,
-            "total_pods": 100, "node_count": 5,
+            "best_expression": "mul(NODE_CPU_AVAIL, sub(CLUSTER_CPU_UTIL, NODE_CPU_UTIL))",
+            "population_size": 50, "n_generations": 20,
+            "total_pods": 50, "node_count": 3,
             "alpha": 0.4, "beta": 0.3, "gamma": 0.3,
-            "node_failures": False, "training_time_s": 4.0,
+            "node_failures": False, "training_time_s": 8.0,
         },
     }
 
@@ -404,16 +404,16 @@ class TestGPvsBaselines:
 
 class TestRuleInterpretability:
     def test_extract_features(self):
-        expr = "add(POD_CPU, mul(NODE_CPU_AVAIL, POD_CPU))"
+        expr = "add(POD_CPU_REQ, mul(NODE_CPU_AVAIL, POD_CPU_REQ))"
         feats = extract_features_from_expression(expr)
-        assert feats["POD_CPU"] == 2
+        assert feats["POD_CPU_REQ"] == 2
         assert feats["NODE_CPU_AVAIL"] == 1
 
     def test_extract_features_empty(self):
         assert extract_features_from_expression("") == {}
 
     def test_expression_complexity(self):
-        expr = "add(POD_CPU, mul(NODE_CPU_AVAIL, RESOURCE_FIT))"
+        expr = "add(POD_CPU_REQ, mul(NODE_CPU_AVAIL, RESOURCE_FIT))"
         c = expression_complexity(expr)
         assert c["n_terminals"] == 3
         assert c["n_functions"] == 2
@@ -421,7 +421,7 @@ class TestRuleInterpretability:
         assert c["depth_estimate"] == 2
 
     def test_simplify_neg_neg(self):
-        assert simplify_expression("neg(neg(POD_CPU))") == "POD_CPU"
+        assert simplify_expression("neg(neg(POD_CPU_REQ))") == "POD_CPU_REQ"
 
     def test_simplify_add_zero(self):
         assert simplify_expression("add(POD_CPU, 0)") == "POD_CPU"

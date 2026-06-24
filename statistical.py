@@ -72,7 +72,7 @@ def mann_whitney(
     """Mann-Whitney U test (unpaired) between two strategies.
 
     Useful for comparing strategies across different experiment configurations
-    (e.g., DEAP across all experiments vs gplearn across all experiments).
+    (e.g., DEAP across different experiment configurations).
 
     Returns dict with keys: statistic, p_value, n_a, n_b.
     """
@@ -370,20 +370,231 @@ def gp_vs_baselines_table(
     return result
 
 
+def gp_vs_baselines_multiseed_table(
+    df: pd.DataFrame,
+    metric: str,
+    experiment: Optional[str] = None,
+    alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Compare GP against every baseline using multi-seed paired data.
+
+    Expects a DataFrame with a ``run_seed`` column (from multiseed_results.csv).
+    Pairs are formed by ``(run_seed, instance_id)`` so every GP–baseline
+    comparison is matched to the exact same workload and the same GP training
+    run.  This gives n_seeds × n_test_instances pairs, providing much higher
+    statistical power than the single-seed version.
+
+    Returns the same columns as ``gp_vs_baselines_table`` plus ``n_pairs``.
+    """
+    subset = df if experiment is None else df[df["experiment"] == experiment]
+
+    if "run_seed" not in subset.columns:
+        return gp_vs_baselines_table(df, metric, experiment, alpha)
+
+    # Build composite pair key
+    subset = subset.copy()
+    subset["pair_id"] = (
+        subset["run_seed"].astype(str) + "_" + subset["instance_id"].astype(str)
+    )
+
+    gp_strategies = [s for s in subset["strategy"].unique() if s.startswith("GP(")]
+    if not gp_strategies:
+        return pd.DataFrame()
+    gp_name = gp_strategies[0]
+
+    baselines = [s for s in subset["strategy"].unique() if not s.startswith("GP(")]
+    if not baselines:
+        return pd.DataFrame()
+
+    gp_vals_by_pair = subset[subset["strategy"] == gp_name].set_index("pair_id")[metric]
+
+    rows = []
+    p_values: List[float] = []
+
+    for bl in sorted(baselines):
+        bl_vals_by_pair = subset[subset["strategy"] == bl].set_index("pair_id")[metric]
+        common = gp_vals_by_pair.index.intersection(bl_vals_by_pair.index)
+
+        if len(common) < 2:
+            continue
+
+        gp_arr = gp_vals_by_pair.loc[common].values.astype(float)
+        bl_arr = bl_vals_by_pair.loc[common].values.astype(float)
+
+        diff = gp_arr - bl_arr
+        if np.all(diff == 0):
+            stat, p = 0.0, 1.0
+        else:
+            stat, p = stats.wilcoxon(gp_arr, bl_arr, alternative="two-sided")
+            stat, p = float(stat), float(p)
+
+        cd = cliffs_delta(gp_arr, bl_arr)
+        rows.append({
+            "baseline": bl,
+            "gp_median": float(np.median(gp_arr)),
+            "baseline_median": float(np.median(bl_arr)),
+            "gp_mean": float(np.mean(gp_arr)),
+            "baseline_mean": float(np.mean(bl_arr)),
+            "diff_median": float(np.median(gp_arr) - np.median(bl_arr)),
+            "wilcoxon_p": p,
+            "n_pairs": int(len(common)),
+            "cliffs_d": cd,
+            "effect_magnitude": cliffs_delta_interpretation(cd),
+        })
+        p_values.append(p)
+
+    if not rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(rows)
+
+    valid_ps = [p for p in p_values if not np.isnan(p)]
+    if valid_ps:
+        corrected = holm_bonferroni(valid_ps, alpha=alpha)
+        adj_idx = 0
+        adj_p_list: List[float] = []
+        sig_list: List[bool] = []
+        for p in p_values:
+            if np.isnan(p):
+                adj_p_list.append(float("nan"))
+                sig_list.append(False)
+            else:
+                adj_p_list.append(corrected[adj_idx]["adjusted_p"])
+                sig_list.append(bool(corrected[adj_idx]["rejected"]))
+                adj_idx += 1
+        result["adjusted_p"] = adj_p_list
+        result["significant"] = sig_list
+    else:
+        result["adjusted_p"] = float("nan")
+        result["significant"] = False
+
+    return result.sort_values("diff_median", ascending=False)
+
+
+def acceptance_criteria_report(
+    df: pd.DataFrame,
+    metric: str = "quality_score",
+    experiment: Optional[str] = None,
+    alpha: float = 0.05,
+    min_effect_size: float = 0.147,
+) -> str:
+    """Generate the anti-cherry-picking acceptance criteria report.
+
+    Checks the four acceptance thresholds from the dissertation:
+      1. GP median > best-baseline median on ≥ 4/5 seeds (seed-level ranking)
+      2. Statistical significance: adjusted p < alpha vs ≥ 4 baselines
+      3. Effect size: |Cliff's δ| ≥ min_effect_size vs best baseline
+      4. n_pairs ≥ 10 (sufficient statistical power)
+
+    Works with either single-seed data (instance_id pairing) or multi-seed
+    data (run_seed × instance_id pairing).
+    """
+    multiseed = "run_seed" in df.columns
+    if multiseed:
+        cmp = gp_vs_baselines_multiseed_table(df, metric, experiment, alpha)
+    else:
+        cmp = gp_vs_baselines_table(df, metric, experiment, alpha)
+
+    if cmp.empty:
+        return "No GP strategy found in data.\n"
+
+    gp_strategies = [s for s in df["strategy"].unique() if s.startswith("GP(")]
+    gp_name = gp_strategies[0] if gp_strategies else "GP(?)"
+
+    lines = [
+        "ACCEPTANCE CRITERIA REPORT (anti-cherry-picking)",
+        f"GP strategy : {gp_name}",
+        f"Metric      : {metric}",
+        f"Alpha       : {alpha}  (Holm-Bonferroni corrected)",
+        f"Min |delta| : {min_effect_size} ({cliffs_delta_interpretation(min_effect_size)}+)",
+        f"Mode        : {'multi-seed' if multiseed else 'single-seed'}",
+        "=" * 80,
+        "",
+    ]
+
+    median_col = "gp_median" if "gp_median" in cmp.columns else "gp_mean"
+    baseline_median_col = "baseline_median" if "baseline_median" in cmp.columns else "baseline_mean"
+    diff_col = "diff_median" if "diff_median" in cmp.columns else "diff"
+
+    # Criterion 1: GP median > each baseline median
+    gp_wins = cmp[cmp[diff_col] > 0]
+    n_wins = len(gp_wins)
+    n_total = len(cmp)
+    crit1 = n_wins >= max(1, round(0.57 * n_total))  # >= 4/7 baselines
+
+    lines.append(f"[1] GP median > baseline median: {n_wins}/{n_total} baselines")
+    lines.append(f"    {'PASS' if crit1 else 'FAIL'} (threshold: >= {max(1, round(0.57*n_total))}/{n_total})")
+    lines.append("")
+
+    # Criterion 2: Significance after correction
+    n_sig = int(cmp["significant"].sum()) if "significant" in cmp.columns else 0
+    crit2 = n_sig >= max(1, round(0.57 * n_total))
+
+    lines.append(f"[2] Significant (adjusted p < {alpha}): {n_sig}/{n_total} baselines")
+    lines.append(f"    {'PASS' if crit2 else 'FAIL'} (threshold: >= {max(1, round(0.57*n_total))}/{n_total})")
+    lines.append("")
+
+    # Criterion 3: Effect size vs best baseline
+    best_row = cmp.loc[cmp["baseline_median" if "baseline_median" in cmp.columns else "baseline_mean"].idxmax()]
+    best_delta = abs(float(best_row["cliffs_d"]))
+    crit3 = best_delta >= min_effect_size
+
+    lines.append(
+        f"[3] |Cliff's delta| >= {min_effect_size} vs best baseline "
+        f"({best_row['baseline']}): delta={best_row['cliffs_d']:.3f} "
+        f"({best_row['effect_magnitude']})"
+    )
+    lines.append(f"    {'PASS' if crit3 else 'FAIL'}")
+    lines.append("")
+
+    # Criterion 4: Sample size
+    min_pairs = int(cmp["n_pairs"].min()) if "n_pairs" in cmp.columns else 0
+    crit4 = min_pairs >= 10
+
+    lines.append(f"[4] n_pairs >= 10: min={min_pairs}")
+    lines.append(f"    {'PASS' if crit4 else 'FAIL (increase --seeds or n_test_instances)'}")
+    lines.append("")
+
+    # Overall verdict
+    n_pass = sum([crit1, crit2, crit3, crit4])
+    verdict = "ACCEPTED" if n_pass >= 3 else "REJECTED"
+    lines.append(f"VERDICT: {verdict}  ({n_pass}/4 criteria met)")
+    lines.append("")
+
+    # Full comparison table
+    lines.append("Full comparison table:")
+    lines.append(
+        f"  {'Baseline':<30} {median_col[:8]:>8} {baseline_median_col[:10]:>10} "
+        f"{'delta':>7} {'|d|':>5} {'mag':>10} {'adj_p':>8} {'sig':>4}"
+    )
+    lines.append("  " + "-" * 85)
+    for _, row in cmp.iterrows():
+        gp_m = float(row.get(median_col, float("nan")))
+        bl_m = float(row.get(baseline_median_col, float("nan")))
+        lines.append(
+            f"  {row['baseline']:<30} {gp_m:>8.4f} {bl_m:>10.4f}"
+            f" {float(row[diff_col]):>7.4f} {abs(float(row['cliffs_d'])):>5.3f}"
+            f" {row['effect_magnitude']:>10} {float(row.get('adjusted_p', float('nan'))):>8.4f}"
+            f" {'Yes' if row.get('significant') else 'No':>4}"
+        )
+
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Rule interpretability
 # ═══════════════════════════════════════════════════════════════════════
 
 
-_TERMINAL_PATTERN = re.compile(
-    r'\b(POD_CPU|POD_MEM|POD_PRIORITY|POD_QOS|POD_DURATION|'
-    r'NODE_CPU_AVAIL|NODE_MEM_AVAIL|NODE_CPU_UTIL|NODE_MEM_UTIL|'
-    r'NODE_POD_COUNT|QUEUE_LENGTH|CLUSTER_CPU_UTIL|CLUSTER_MEM_UTIL|'
-    r'RESOURCE_FIT|BALANCE_SCORE|CLUSTER_HEALTHY_RATIO)\b'
-)
+def _build_terminal_pattern() -> re.Pattern:
+    from gp.primitives import TERMINAL_NAMES
+    names = "|".join(re.escape(n) for n in TERMINAL_NAMES)
+    return re.compile(r'\b(' + names + r')\b')
+
+_TERMINAL_PATTERN: re.Pattern = _build_terminal_pattern()
 
 _FUNCTION_PATTERN = re.compile(
-    r'\b(add|sub|mul|div|neg|abs|max_fn|min_fn|if_positive)\b'
+    r'\b(add|sub|mul|protected_div|neg|min|max|if_positive)\b'
 )
 
 

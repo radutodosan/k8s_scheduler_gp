@@ -70,10 +70,76 @@ class NodeConfig:
 
 
 @dataclass
+class NodeHeterogeneityConfig:
+    """Controls automatic generation of heterogeneous node tiers.
+
+    When enabled, each NodeConfig template is expanded into ``tiers``
+    distinct sub-templates whose CPU, memory, and cost vary linearly
+    across the specified ranges.  The node count is distributed evenly
+    across tiers (remainder goes to the first tiers).
+
+    Example — tiers=3, cpu_range=[4,16], count=6:
+        tier-1: 2 × (cpu=4,  mem=8192,  cost=0.5)
+        tier-2: 2 × (cpu=10, mem=20480, cost=1.5)
+        tier-3: 2 × (cpu=16, mem=32768, cost=2.5)
+    """
+
+    enabled: bool = False
+    tiers: int = 3
+    cpu_range: List[float] = field(default_factory=lambda: [4.0, 16.0])
+    mem_range: List[float] = field(default_factory=lambda: [8192.0, 32768.0])
+    cost_range: List[float] = field(default_factory=lambda: [0.5, 2.5])
+
+    def validate(self) -> None:
+        _check_positive("NodeHeterogeneityConfig.tiers", self.tiers)
+        if self.tiers > 10:
+            raise ConfigValidationError("NodeHeterogeneityConfig.tiers must be <= 10")
+        _check_range("NodeHeterogeneityConfig.cpu_range", self.cpu_range, min_bound=0.1)
+        _check_range("NodeHeterogeneityConfig.mem_range", self.mem_range, min_bound=128.0)
+        _check_range("NodeHeterogeneityConfig.cost_range", self.cost_range, min_bound=0.0)
+
+
+@dataclass
 class ClusterConfig:
     """Cluster-level experiment settings."""
 
     node_templates: List[NodeConfig] = field(default_factory=lambda: [NodeConfig()])
+    heterogeneity: NodeHeterogeneityConfig = field(
+        default_factory=NodeHeterogeneityConfig
+    )
+
+    def effective_templates(self) -> List[NodeConfig]:
+        """Return node templates, expanding tiers when heterogeneity is enabled."""
+        if not self.heterogeneity.enabled:
+            return self.node_templates
+
+        het = self.heterogeneity
+        result: List[NodeConfig] = []
+        for base in self.node_templates:
+            total = base.count
+            # Distribute count across tiers (remainder to first tiers)
+            base_per_tier = total // het.tiers
+            remainder = total % het.tiers
+            counts = [base_per_tier + (1 if i < remainder else 0)
+                      for i in range(het.tiers)]
+
+            for i, cnt in enumerate(counts):
+                if cnt == 0:
+                    continue
+                t = i / max(het.tiers - 1, 1)  # 0.0 → 1.0
+                cpu = het.cpu_range[0] + t * (het.cpu_range[1] - het.cpu_range[0])
+                mem = het.mem_range[0] + t * (het.mem_range[1] - het.mem_range[0])
+                cost = het.cost_range[0] + t * (het.cost_range[1] - het.cost_range[0])
+                result.append(NodeConfig(
+                    count=cnt,
+                    cpu_capacity=round(cpu, 1),
+                    mem_capacity=round(mem),
+                    gpu_capacity=base.gpu_capacity,
+                    cost_per_hour=round(cost, 2),
+                    taints=list(base.taints),
+                    labels={**base.labels, "tier": f"tier-{i + 1}"},
+                ))
+        return result
 
     def validate(self) -> None:
         if not self.node_templates:
@@ -83,6 +149,7 @@ class ClusterConfig:
                 nt.validate()
             except ConfigValidationError as e:
                 raise ConfigValidationError(f"node_templates[{i}]: {e}") from e
+        self.heterogeneity.validate()
 
 
 # ─── Workload configuration ─────────────────────────────────────────────
@@ -214,7 +281,7 @@ class WorkloadConfig:
 class GPConfig:
     """Parameters for the GP engine."""
 
-    engine: str = "deap"                 # 'deap' or 'gplearn' (Phase 2)
+    engine: str = "deap"
     population_size: int = 150
     n_generations: int = 50
     tournament_size: int = 3
@@ -224,8 +291,17 @@ class GPConfig:
     elitism_ratio: float = 0.05
     parsimony_coefficient: float = 0.001  # bloat control
     multi_objective: bool = False         # NSGA-II (3 objectives: wait, waste, reject)
+    n_workers: int = 1                    # parallel workers for training-instance fitness
+    fitness_aggregation: str = "mean"     # "mean" or "mean_minus_std"
+    fitness_std_penalty: float = 0.0      # lambda in mean - lambda * std
+    validation_hof_size: int = 0          # 0 disables validation-based champion selection
+    n_restarts: int = 1                   # independent restarts; best-fitness run is kept
+    # Terminal-control knobs for GP simplification.
+    # Backward compatible behavior: when both lists are empty, all terminals are used.
+    terminal_mandatory: List[str] = field(default_factory=list)
+    terminal_optional_enabled: List[str] = field(default_factory=list)
 
-    VALID_ENGINES = ("deap", "gplearn")
+    VALID_ENGINES = ("deap",)
 
     def validate(self) -> None:
         if self.engine not in self.VALID_ENGINES:
@@ -244,10 +320,48 @@ class GPConfig:
         _check_positive("GPConfig.max_tree_depth", self.max_tree_depth)
         _check_probability("GPConfig.elitism_ratio", self.elitism_ratio)
         _check_positive("GPConfig.parsimony_coefficient", self.parsimony_coefficient, allow_zero=True)
-        if self.multi_objective and self.engine != "deap":
+        _check_positive("GPConfig.n_workers", self.n_workers)
+        if self.fitness_aggregation not in ("mean", "mean_minus_std"):
             raise ConfigValidationError(
-                "multi_objective=True is only supported with engine='deap'"
+                "fitness_aggregation must be 'mean' or 'mean_minus_std', "
+                f"got {self.fitness_aggregation!r}"
             )
+        _check_positive("GPConfig.fitness_std_penalty", self.fitness_std_penalty, allow_zero=True)
+        _check_positive("GPConfig.validation_hof_size", self.validation_hof_size, allow_zero=True)
+
+        from gp.primitives import TERMINAL_NAMES
+
+        known = set(TERMINAL_NAMES)
+        for name in self.terminal_mandatory:
+            if name not in known:
+                raise ConfigValidationError(
+                    f"Unknown mandatory terminal {name!r}. Must be one of TERMINAL_NAMES"
+                )
+        for name in self.terminal_optional_enabled:
+            if name not in known:
+                raise ConfigValidationError(
+                    f"Unknown optional terminal {name!r}. Must be one of TERMINAL_NAMES"
+                )
+
+    def selected_terminals(self) -> List[str]:
+        """Return active terminal names in canonical TERMINAL_NAMES order.
+
+        Rules:
+          - if both terminal lists are empty, return all terminals (legacy behavior)
+          - otherwise return mandatory ∪ optional_enabled, keeping canonical order
+        """
+        from gp.primitives import TERMINAL_NAMES
+
+        if not self.terminal_mandatory and not self.terminal_optional_enabled:
+            return list(TERMINAL_NAMES)
+
+        selected = set(self.terminal_mandatory) | set(self.terminal_optional_enabled)
+        ordered = [name for name in TERMINAL_NAMES if name in selected]
+        if not ordered:
+            raise ConfigValidationError(
+                "At least one GP terminal must be selected via terminal_mandatory or terminal_optional_enabled"
+            )
+        return ordered
 
 
 # ─── Dynamics configuration ───────────────────────────────────────────────
@@ -322,17 +436,50 @@ class DynamicsConfig:
 
 @dataclass
 class FitnessWeights:
-    """Weights α, β, γ for the combined fitness function."""
+    """Weights for the combined fitness function.
 
-    alpha_wait_time: float = 0.4
-    beta_resource_waste: float = 0.3
-    gamma_failed_pods: float = 0.3
+        quality = 1 - (alpha*W + beta*R + gamma*F + delta*E + epsilon*P + eta*C + zeta*A
+                       + theta*G + iota*K)
+      W = wait_time / (wait_time + 1)
+      R = 1 - mean(cpu_utilization, mem_utilization)
+      F = rejected_pods / total_pods
+      E = evicted_pods / (evicted + 0.75)
+      P = preemption_count / (preemptions + 0.5)
+      C = churn_rate / (churn + 0.5)
+      A = avg_scheduling_attempts / (attempts + 1)
+      G = 1 - avg_gpu_utilization          [theta_gpu_waste — for GPU-heavy workloads]
+      K = cost_per_pod / (cost_per_pod + 0.005)  [iota_cost — for cost-aware scheduling]
+    All weights must sum to ~1.0.
+    """
+
+    alpha_wait_time: float = 0.35
+    beta_resource_waste: float = 0.25
+    gamma_failed_pods: float = 0.25
+    delta_evicted_pods: float = 0.15
+    epsilon_preemptions: float = 0.0
+    eta_churn: float = 0.0
+    zeta_scheduling_attempts: float = 0.0
+    theta_gpu_waste: float = 0.0     # penalizes idle GPU capacity (for ai_training profile)
+    iota_cost: float = 0.0           # penalizes expensive node usage (for heterogeneous clusters)
 
     def validate(self) -> None:
-        _check_positive("FitnessWeights.alpha_wait_time", self.alpha_wait_time, allow_zero=True)
-        _check_positive("FitnessWeights.beta_resource_waste", self.beta_resource_waste, allow_zero=True)
-        _check_positive("FitnessWeights.gamma_failed_pods", self.gamma_failed_pods, allow_zero=True)
-        total = self.alpha_wait_time + self.beta_resource_waste + self.gamma_failed_pods
+        for name, val in [
+            ("alpha_wait_time", self.alpha_wait_time),
+            ("beta_resource_waste", self.beta_resource_waste),
+            ("gamma_failed_pods", self.gamma_failed_pods),
+            ("delta_evicted_pods", self.delta_evicted_pods),
+            ("epsilon_preemptions", self.epsilon_preemptions),
+            ("eta_churn", self.eta_churn),
+            ("zeta_scheduling_attempts", self.zeta_scheduling_attempts),
+            ("theta_gpu_waste", self.theta_gpu_waste),
+            ("iota_cost", self.iota_cost),
+        ]:
+            _check_positive(f"FitnessWeights.{name}", val, allow_zero=True)
+        total = (self.alpha_wait_time + self.beta_resource_waste +
+                 self.gamma_failed_pods + self.delta_evicted_pods +
+                 self.epsilon_preemptions + self.eta_churn +
+                 self.zeta_scheduling_attempts + self.theta_gpu_waste +
+                 self.iota_cost)
         if abs(total - 1.0) > 0.01:
             raise ConfigValidationError(
                 f"Fitness weights must sum to ~1.0, got {total:.4f}"
@@ -352,6 +499,7 @@ class ExperimentConfig:
     name: str = "default_experiment"
     seed: int = 42
     num_training_instances: int = 5
+    num_validation_instances: int = 0
     num_test_instances: int = 5
     dynamic_instances: bool = False      # regenerate training instances each generation
     output_dir: str = "tmp/results"
@@ -381,7 +529,12 @@ class ExperimentConfig:
         node_templates = [
             NodeConfig(**nt) for nt in cluster_raw.get("node_templates", [{}])
         ]
-        cluster = ClusterConfig(node_templates=node_templates)
+        het_raw = cluster_raw.get("node_heterogeneity", {})
+        heterogeneity = (
+            NodeHeterogeneityConfig(**het_raw) if het_raw
+            else NodeHeterogeneityConfig()
+        )
+        cluster = ClusterConfig(node_templates=node_templates, heterogeneity=heterogeneity)
 
         workload = WorkloadConfig(**d.get("workload", {}))
         gp = GPConfig(**d.get("gp", {}))
@@ -401,6 +554,7 @@ class ExperimentConfig:
             name=d.get("name", "default_experiment"),
             seed=d.get("seed", 42),
             num_training_instances=d.get("num_training_instances", 5),
+            num_validation_instances=d.get("num_validation_instances", 0),
             num_test_instances=d.get("num_test_instances", 5),
             dynamic_instances=d.get("dynamic_instances", False),
             output_dir=d.get("output_dir", "tmp/results"),
@@ -417,6 +571,7 @@ class ExperimentConfig:
     def validate(self) -> None:
         """Validate the entire configuration tree."""
         _check_positive("ExperimentConfig.num_training_instances", self.num_training_instances)
+        _check_positive("ExperimentConfig.num_validation_instances", self.num_validation_instances, allow_zero=True)
         _check_positive("ExperimentConfig.num_test_instances", self.num_test_instances)
         if self.output_format not in ("csv", "json"):
             raise ConfigValidationError(

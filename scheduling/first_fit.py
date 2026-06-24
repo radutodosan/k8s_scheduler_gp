@@ -22,6 +22,7 @@ class FirstFitStrategy(ISchedulingStrategy):
 
     def select_node(self, pod: Pod, cluster: ClusterState) -> Optional[str]:
         for node_id in sorted(cluster.nodes.keys()):
-            if cluster.nodes[node_id].can_fit(pod):
+            node = cluster.nodes[node_id]
+            if node.is_available and node.can_fit(pod):
                 return node_id
         return None

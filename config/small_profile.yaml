@@ -1,0 +1,125 @@
+﻿# --------------------------------------------------------------------------
+# Small profile (~10 minutes)
+# --------------------------------------------------------------------------
+# Calibration baseline for fast-but-meaningful DEAP runs.
+
+name: "small_profile"
+seed: 42
+num_training_instances: 4
+num_validation_instances: 2
+num_test_instances: 4
+dynamic_instances: true
+output_dir: "tmp/results"
+output_format: "csv"
+
+cluster:
+  node_templates:
+    - count: 8
+      cpu_capacity: 8.0
+      mem_capacity: 16384.0
+      cost_per_hour: 1.0
+
+workload:
+  total_pods: 120
+  arrival_rate: 0.9
+  burst_probability: 0.08
+  burst_size_min: 2
+  burst_size_max: 6
+  cpu_range: [0.1, 1.6]
+  mem_range: [128.0, 3072.0]
+  duration_range: [4.0, 40.0]
+  priority_weights:
+    low: 0.5
+    medium: 0.3
+    high: 0.2
+  qos_weights:
+    best_effort: 0.3
+    burstable: 0.45
+    guaranteed: 0.25
+  namespaces: ["default", "production", "batch"]
+  possible_taints: ["spot", "gpu"]
+  taint_toleration_probability: 0.5
+  possible_labels:
+    disktype: ["ssd", "hdd"]
+    zone: ["zone-a", "zone-b"]
+  node_selector_probability: 0.12
+  limit_ratio_min: 1.0
+  limit_ratio_max: 1.6
+  limit_probability: 0.35
+  possible_anti_affinity_keys: ["app-web", "app-api", "app-worker", "app-data"]
+  anti_affinity_probability: 0.25
+  arrival_pattern: "diurnal"
+  diurnal_peak_rate: 2.2
+  diurnal_trough_rate: 0.6
+  bursty_spike_multiplier: 3.5
+  bursty_spike_probability: 0.10
+  profile: "mixed"
+  profile_mix:
+    web_serving: 0.30
+    ai_training: 0.10
+    ci_cd: 0.15
+    batch_processing: 0.20
+    microservices: 0.25
+
+gp:
+  engine: "deap"
+  population_size: 100
+  n_generations: 32
+  tournament_size: 4
+  crossover_prob: 0.82
+  mutation_prob: 0.18
+  max_tree_depth: 7
+  elitism_ratio: 0.08
+  parsimony_coefficient: 0.010
+  n_workers: 1
+  fitness_aggregation: "mean_minus_std"
+  fitness_std_penalty: 0.30
+  validation_hof_size: 5
+  multi_objective: false
+  terminal_mandatory:
+    - "POD_CPU_REQ"
+    - "POD_MEM_REQ"
+    - "POD_GPU_REQ"
+    - "POD_PRIORITY"
+    - "POD_WAIT_TIME"
+    - "NODE_CPU_AVAIL"
+    - "NODE_MEM_AVAIL"
+    - "NODE_GPU_AVAIL"
+    - "NODE_CPU_UTIL"
+    - "NODE_MEM_UTIL"
+    - "NODE_CPU_FREE_AFTER"
+    - "NODE_MEM_FREE_AFTER"
+    - "PENDING_COUNT"
+    - "PENDING_PRESSURE"
+    - "RESOURCE_FIT"
+    - "NODE_TAINT_COUNT"
+    - "NODE_AFFINITY_CONFLICT"
+    - "NODE_PREEMPTABLE_COUNT"
+    - "NODE_OVERCOMMIT_RATIO"
+    - "CLUSTER_HEALTHY_RATIO"
+  terminal_optional_enabled:
+    - "POD_DURATION"
+    - "NODE_POD_COUNT"
+    - "NODE_CPU_MEM_IMBALANCE"
+    - "CLUSTER_CPU_UTIL"
+    - "CLUSTER_MEM_UTIL"
+    - "CLUSTER_GPU_UTIL"
+    - "CLUSTER_UTIL_STD"
+    - "NAMESPACE_PENDING_RATIO"
+
+fitness:
+  alpha_wait_time: 0.14
+  beta_resource_waste: 0.24
+  gamma_failed_pods: 0.24
+  delta_evicted_pods: 0.18
+  epsilon_preemptions: 0.08
+  eta_churn: 0.08
+  zeta_scheduling_attempts: 0.04
+
+dynamics:
+  failure_mode: "reschedule"
+  failure_rate: 2
+  recovery_time_min: 10.0
+  recovery_time_max: 30.0
+  restart_overhead_min: 2.0
+  restart_overhead_max: 8.0

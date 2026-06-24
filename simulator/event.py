@@ -13,8 +13,8 @@ class EventType(Enum):
     POD_ARRIVAL:     A new pod enters the pending queue.
     POD_COMPLETION:  A running pod finishes execution.
     SCHEDULE_CYCLE:  Trigger for the scheduler to process the pending queue.
-    NODE_FAILURE:    A node becomes unavailable (reserved — not implemented in Phase 1).
-    NODE_RECOVERY:   A failed node comes back online (reserved — Phase 2).
+    NODE_FAILURE:    A node becomes unavailable.
+    NODE_RECOVERY:   A failed node comes back online.
     """
 
     POD_ARRIVAL = auto()

@@ -474,6 +474,44 @@ body { padding-bottom: 56px; } /* space for status bar */
   color: var(--text2);
 }
 .estimate-box strong { color: var(--text); }
+
+/* GP terminals selector */
+.terminal-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.terminal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+.terminal-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface2);
+  font-size: .82rem;
+}
+.terminal-item input[type="checkbox"] {
+  accent-color: var(--primary);
+}
+.terminal-item .terminal-name {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: .78rem;
+}
+.terminal-item.mandatory {
+  border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+}
+.terminal-summary {
+  margin-top: 10px;
+  font-size: .8rem;
+  color: var(--text2);
+}
 </style>
 <script src="/shared.js"></script>
 <script>initTheme();</script>
@@ -486,6 +524,7 @@ body { padding-bottom: 56px; } /* space for status bar */
 <!-- Presets bar -->
 <div class="presets-bar">
   <span>Preseturi:</span>
+  <button class="btn btn-sm btn-primary" onclick="loadPreset('optimal')">🏆 Optimal</button>
   <button class="btn btn-sm" onclick="loadPreset('smoke')">🧪 Smoke Test</button>
   <button class="btn btn-sm" onclick="loadPreset('small')">📦 Small</button>
   <button class="btn btn-sm" onclick="loadPreset('medium')">📦 Medium</button>
@@ -847,10 +886,9 @@ zone: zone-a, zone-b</textarea>
     <h3>Motor GP</h3>
     <div class="field-group">
       <div class="field">
-        <label>Engine <span class="tooltip-icon" data-tip="DEAP: evaluează fiecare individ prin simulare completă (robust, lent). gplearn: regresie simbolică pe date colectate (rapid, aproximativ).">?</span></label>
+        <label>Engine <span class="tooltip-icon" data-tip="DEAP: evaluează fiecare individ prin simulare completă. Evoluează reguli interpretabile care pot depăși heuristic-urile clasice.">?</span></label>
         <select id="cfg-engine">
           <option value="deap" selected>DEAP (simulation-based)</option>
-          <option value="gplearn">gplearn (regression-based)</option>
         </select>
       </div>
       <div class="field">
@@ -900,6 +938,19 @@ zone: zone-a, zone-b</textarea>
           <span class="slider-val" id="val-elitism">0.05</span>
         </div>
       </div>
+    </div>
+
+    <div style="margin-top:14px">
+      <label style="font-size:.82rem;font-weight:600;color:var(--text2)">Terminale GP</label>
+      <p style="font-size:.8rem;color:var(--text2);margin:4px 0 10px 0">
+        Terminalele obligatorii rămân mereu active. Din cele opționale poți selecta subsetul folosit în evoluție.
+      </p>
+      <div class="terminal-tools">
+        <button class="btn btn-sm" type="button" onclick="selectAllOptionalTerminals()">Selectează toate opționalele</button>
+        <button class="btn btn-sm" type="button" onclick="clearOptionalTerminals()">Debifează toate opționalele</button>
+      </div>
+      <div class="terminal-grid" id="gp-terminal-grid"></div>
+      <div class="terminal-summary" id="gp-terminal-summary">Terminale active: 0</div>
     </div>
 
     <div class="estimate-box" id="gp-estimate">
@@ -1057,6 +1108,77 @@ let nodeTemplates = [
   { count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0, taints: '', labels: '' }
 ];
 let validationErrors = [];
+let _isApplyingPolicy = false;
+
+const ALL_GP_TERMINALS = [
+  'POD_CPU_REQ', 'POD_MEM_REQ', 'POD_GPU_REQ', 'POD_PRIORITY', 'POD_QOS',
+  'POD_WAIT_TIME', 'POD_DURATION', 'NODE_CPU_AVAIL', 'NODE_MEM_AVAIL',
+  'NODE_GPU_AVAIL', 'NODE_CPU_UTIL', 'NODE_MEM_UTIL', 'NODE_POD_COUNT',
+  'NODE_COST', 'NODE_TAINT_COUNT', 'NODE_CPU_MEM_IMBALANCE',
+  'NODE_CPU_FREE_AFTER', 'NODE_MEM_FREE_AFTER', 'PENDING_COUNT',
+  'CLUSTER_CPU_UTIL', 'CLUSTER_MEM_UTIL', 'CLUSTER_GPU_UTIL',
+  'PENDING_PRESSURE', 'CLUSTER_UTIL_STD', 'RESOURCE_FIT',
+  'CLUSTER_HEALTHY_RATIO', 'NODE_PREEMPTABLE_COUNT',
+  'NODE_OVERCOMMIT_RATIO', 'NODE_AFFINITY_CONFLICT',
+  'REPLICA_GROUP_COLOCATED', 'NAMESPACE_PENDING_RATIO'
+];
+
+const DEFAULT_MANDATORY_TERMINALS = [
+  // Core demand + feasibility + realism constraints.
+  'POD_CPU_REQ', 'POD_MEM_REQ', 'POD_GPU_REQ', 'POD_PRIORITY', 'POD_WAIT_TIME',
+  'NODE_CPU_AVAIL', 'NODE_MEM_AVAIL', 'NODE_GPU_AVAIL',
+  'NODE_CPU_UTIL', 'NODE_MEM_UTIL', 'NODE_CPU_FREE_AFTER', 'NODE_MEM_FREE_AFTER',
+  'PENDING_COUNT', 'PENDING_PRESSURE', 'RESOURCE_FIT',
+  'NODE_TAINT_COUNT', 'NODE_AFFINITY_CONFLICT',
+  'NODE_PREEMPTABLE_COUNT', 'NODE_OVERCOMMIT_RATIO',
+  'CLUSTER_HEALTHY_RATIO'
+];
+
+let terminalMandatory = [...DEFAULT_MANDATORY_TERMINALS];
+let terminalOptionalEnabled = ALL_GP_TERMINALS.filter(t => !terminalMandatory.includes(t));
+
+const OPTIMAL_POLICY = {
+  general: {
+    minTrain: 4,
+    maxTrain: 16,
+    minTest: 2,
+    maxTest: 8,
+  },
+  workload: {
+    minArrivalRate: 0.7,
+    maxArrivalRate: 1.3,
+    maxBurstProbability: 0.15,
+    minBurstMin: 2,
+    maxBurstMax: 8,
+    minLimitProb: 0.2,
+    maxLimitProb: 0.45,
+    maxLimitRatioMax: 1.8,
+    minLimitRatioMin: 1.0,
+    maxNodeSelectorProb: 0.2,
+    minAntiAffinityProb: 0.05,
+    maxAntiAffinityProb: 0.35,
+    maxTaintProb: 0.5,
+  },
+  gp: {
+    engine: 'deap',
+    minPop: 60,
+    maxPop: 220,
+    minGen: 20,
+    maxGen: 80,
+    minTournament: 3,
+    maxTournament: 7,
+    minDepth: 6,
+    maxDepth: 12,
+    minCx: 0.7,
+    maxCx: 0.9,
+    minMut: 0.1,
+    maxMut: 0.3,
+    minElitism: 0.03,
+    maxElitism: 0.12,
+    minParsimony: 0.0005,
+    maxParsimony: 0.01,
+  },
+};
 
 /* ── Tabs ───────────────────────────────────────────────────────────── */
 function switchTab(id) {
@@ -1074,6 +1196,187 @@ function setupSlider(inputId, displayId) {
     disp.textContent = parseFloat(inp.value).toFixed(2);
     validateAll();
   });
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundTo(value, decimals = 2) {
+  const f = 10 ** decimals;
+  return Math.round(value * f) / f;
+}
+
+function getNumeric(id) {
+  const el = document.getElementById(id);
+  if (!el) return NaN;
+  return parseFloat(el.value);
+}
+
+function setNumeric(id, value, decimals = null) {
+  const el = document.getElementById(id);
+  if (!el || !Number.isFinite(value)) return false;
+  const normalized = decimals == null ? value : roundTo(value, decimals);
+  const next = String(normalized);
+  if (el.value !== next) {
+    el.value = next;
+    return true;
+  }
+  return false;
+}
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return false;
+  const next = String(value);
+  if (el.value !== next) {
+    el.value = next;
+    return true;
+  }
+  return false;
+}
+
+function setSliderValue(id, valId, value, decimals = 2) {
+  const changed = setNumeric(id, value, decimals);
+  const out = document.getElementById(valId);
+  const el = document.getElementById(id);
+  if (out && el) {
+    out.textContent = parseFloat(el.value).toFixed(decimals);
+  }
+  return changed;
+}
+
+function rebalanceWeightsWithMinima(weights, minima) {
+  const keys = Object.keys(weights);
+  const mins = {};
+  keys.forEach(k => {
+    mins[k] = minima[k] || 0;
+  });
+  const minSum = keys.reduce((s, k) => s + mins[k], 0);
+  if (minSum >= 1.0) {
+    const fallback = { alpha: 0.30, beta: 0.25, gamma: 0.45 };
+    return {
+      alpha: fallback.alpha,
+      beta: fallback.beta,
+      gamma: fallback.gamma,
+    };
+  }
+
+  const clamped = {};
+  keys.forEach(k => {
+    clamped[k] = Math.max(mins[k], weights[k]);
+  });
+  const extraBudget = 1.0 - minSum;
+  const currentExtra = keys.reduce((s, k) => s + (clamped[k] - mins[k]), 0);
+  const out = {};
+
+  if (currentExtra <= 1e-9) {
+    const share = extraBudget / keys.length;
+    keys.forEach(k => {
+      out[k] = mins[k] + share;
+    });
+  } else {
+    keys.forEach(k => {
+      out[k] = mins[k] + ((clamped[k] - mins[k]) / currentExtra) * extraBudget;
+    });
+  }
+
+  // Keep two decimals and force exact sum=1.00 by assigning the rounding delta to gamma.
+  keys.forEach(k => {
+    out[k] = roundTo(out[k], 2);
+  });
+  const roundedSum = keys.reduce((s, k) => s + out[k], 0);
+  const delta = roundTo(1.0 - roundedSum, 2);
+  if (Math.abs(delta) > 0 && out.gamma !== undefined) {
+    out.gamma = roundTo(out.gamma + delta, 2);
+  }
+
+  return out;
+}
+
+function applyOptimizationGuardrails() {
+  if (_isApplyingPolicy) return;
+  _isApplyingPolicy = true;
+  try {
+    // Keep optimization-oriented dynamics and engine defaults.
+    setValue('cfg-failure-mode', 'off');
+    setValue('cfg-dynamic-instances', 'true');
+    setValue('cfg-engine', OPTIMAL_POLICY.gp.engine);
+
+    const totalNodes = Math.max(1, nodeTemplates.reduce((s, nt) => s + (parseInt(nt.count) || 0), 0));
+    const totalCpu = Math.max(1, nodeTemplates.reduce((s, nt) => s + (parseInt(nt.count) || 0) * (parseFloat(nt.cpu_capacity) || 0), 0));
+    const totalMem = Math.max(1024, nodeTemplates.reduce((s, nt) => s + (parseInt(nt.count) || 0) * (parseFloat(nt.mem_capacity) || 0), 0));
+    const maxNodeCpu = Math.max(1, ...nodeTemplates.map(nt => parseFloat(nt.cpu_capacity) || 0));
+    const maxNodeMem = Math.max(1024, ...nodeTemplates.map(nt => parseFloat(nt.mem_capacity) || 0));
+
+    // General
+    setNumeric('cfg-train-instances', Math.round(clamp(getNumeric('cfg-train-instances') || 8, OPTIMAL_POLICY.general.minTrain, OPTIMAL_POLICY.general.maxTrain)));
+    setNumeric('cfg-test-instances', Math.round(clamp(getNumeric('cfg-test-instances') || 4, OPTIMAL_POLICY.general.minTest, OPTIMAL_POLICY.general.maxTest)));
+
+    // Keep pods in a healthy capacity envelope per node.
+    const minPods = totalNodes * 8;
+    const maxPods = totalNodes * 18;
+    setNumeric('cfg-total-pods', Math.round(clamp(getNumeric('cfg-total-pods') || minPods, minPods, maxPods)));
+
+    setNumeric('cfg-arrival-rate', clamp(getNumeric('cfg-arrival-rate') || 0.9, OPTIMAL_POLICY.workload.minArrivalRate, OPTIMAL_POLICY.workload.maxArrivalRate), 2);
+    setSliderValue('cfg-burst-prob', 'val-burst-prob', clamp(getNumeric('cfg-burst-prob') || 0.08, 0.0, OPTIMAL_POLICY.workload.maxBurstProbability), 2);
+
+    const burstMin = Math.round(clamp(getNumeric('cfg-burst-min') || 2, OPTIMAL_POLICY.workload.minBurstMin, OPTIMAL_POLICY.workload.maxBurstMax));
+    const burstMax = Math.round(clamp(getNumeric('cfg-burst-max') || 6, burstMin, OPTIMAL_POLICY.workload.maxBurstMax));
+    setNumeric('cfg-burst-min', burstMin);
+    setNumeric('cfg-burst-max', burstMax);
+
+    // Per-pod requests must be realistically schedulable relative to node capacity.
+    const cpuCap = Math.max(0.8, Math.min(4.0, maxNodeCpu * 0.5));
+    let cpuMin = clamp(getNumeric('cfg-cpu-min') || 0.1, 0.05, cpuCap);
+    let cpuMax = clamp(getNumeric('cfg-cpu-max') || 1.6, cpuMin, cpuCap);
+    setNumeric('cfg-cpu-min', cpuMin, 2);
+    setNumeric('cfg-cpu-max', cpuMax, 2);
+
+    const memCap = Math.max(1024, Math.min(8192, maxNodeMem * 0.5));
+    let memMin = clamp(getNumeric('cfg-mem-min') || 128, 64, memCap);
+    let memMax = clamp(getNumeric('cfg-mem-max') || 3072, memMin, memCap);
+    setNumeric('cfg-mem-min', memMin, 0);
+    setNumeric('cfg-mem-max', memMax, 0);
+
+    const durMin = clamp(getNumeric('cfg-dur-min') || 4, 1, 60);
+    const durMax = clamp(getNumeric('cfg-dur-max') || 40, durMin, 120);
+    setNumeric('cfg-dur-min', durMin, 0);
+    setNumeric('cfg-dur-max', durMax, 0);
+
+    setSliderValue('cfg-taint-prob', 'val-taint-prob', clamp(getNumeric('cfg-taint-prob') || 0.5, 0.0, OPTIMAL_POLICY.workload.maxTaintProb), 2);
+    setSliderValue('cfg-selector-prob', 'val-selector-prob', clamp(getNumeric('cfg-selector-prob') || 0.12, 0.0, OPTIMAL_POLICY.workload.maxNodeSelectorProb), 2);
+    setSliderValue('cfg-limit-prob', 'val-limit-prob', clamp(getNumeric('cfg-limit-prob') || 0.35, OPTIMAL_POLICY.workload.minLimitProb, OPTIMAL_POLICY.workload.maxLimitProb), 2);
+    setSliderValue('cfg-aa-prob', 'val-aa-prob', clamp(getNumeric('cfg-aa-prob') || 0.20, OPTIMAL_POLICY.workload.minAntiAffinityProb, OPTIMAL_POLICY.workload.maxAntiAffinityProb), 2);
+
+    const lrMin = clamp(getNumeric('cfg-limit-ratio-min') || 1.0, OPTIMAL_POLICY.workload.minLimitRatioMin, OPTIMAL_POLICY.workload.maxLimitRatioMax);
+    const lrMax = clamp(getNumeric('cfg-limit-ratio-max') || 1.6, lrMin, OPTIMAL_POLICY.workload.maxLimitRatioMax);
+    setNumeric('cfg-limit-ratio-min', lrMin, 2);
+    setNumeric('cfg-limit-ratio-max', lrMax, 2);
+
+    // Keep GP hyperparameters in quality-oriented search ranges.
+    const pop = Math.round(clamp(getNumeric('cfg-pop-size') || 120, OPTIMAL_POLICY.gp.minPop, OPTIMAL_POLICY.gp.maxPop));
+    const gen = Math.round(clamp(getNumeric('cfg-generations') || 40, OPTIMAL_POLICY.gp.minGen, OPTIMAL_POLICY.gp.maxGen));
+    setNumeric('cfg-pop-size', pop);
+    setNumeric('cfg-generations', gen);
+    setNumeric('cfg-tournament', Math.round(clamp(getNumeric('cfg-tournament') || 4, OPTIMAL_POLICY.gp.minTournament, Math.min(OPTIMAL_POLICY.gp.maxTournament, pop))));
+    setNumeric('cfg-max-depth', Math.round(clamp(getNumeric('cfg-max-depth') || 9, OPTIMAL_POLICY.gp.minDepth, OPTIMAL_POLICY.gp.maxDepth)));
+    setSliderValue('cfg-cx-prob', 'val-cx-prob', clamp(getNumeric('cfg-cx-prob') || 0.82, OPTIMAL_POLICY.gp.minCx, OPTIMAL_POLICY.gp.maxCx), 2);
+    setSliderValue('cfg-mut-prob', 'val-mut-prob', clamp(getNumeric('cfg-mut-prob') || 0.18, OPTIMAL_POLICY.gp.minMut, OPTIMAL_POLICY.gp.maxMut), 2);
+    setSliderValue('cfg-elitism', 'val-elitism', clamp(getNumeric('cfg-elitism') || 0.08, OPTIMAL_POLICY.gp.minElitism, OPTIMAL_POLICY.gp.maxElitism), 2);
+    setNumeric('cfg-parsimony', clamp(getNumeric('cfg-parsimony') || 0.002, OPTIMAL_POLICY.gp.minParsimony, OPTIMAL_POLICY.gp.maxParsimony), 4);
+
+    // Dynamics kept off for optimal quality under stable benchmark conditions.
+    setValue('cfg-failure-mode', 'off');
+
+    // Fitness weights: force a reliability-aware mix and exact sum=1.
+    const fw = getWeights('fitness-weights');
+    const optimizedFw = rebalanceWeightsWithMinima(fw, { alpha: 0.2, beta: 0.15, gamma: 0.35 });
+    setWeights('fitness-weights', optimizedFw);
+    updateFitnessWeights();
+  } finally {
+    _isApplyingPolicy = false;
+  }
 }
 setupSlider('cfg-burst-prob', 'val-burst-prob');
 setupSlider('cfg-bursty-prob', 'val-bursty-prob');
@@ -1256,6 +1559,8 @@ function updateProfileUI() {
 
 /* ── Validation ─────────────────────────────────────────────────────── */
 function validateAll() {
+  if (_isApplyingPolicy) return;
+  applyOptimizationGuardrails();
   validationErrors = [];
 
   // Helper: validate and show error
@@ -1315,6 +1620,9 @@ function validateAll() {
   v('cfg-generations', parseInt(document.getElementById('cfg-generations').value) >= 1, 'Trebuie ≥ 1');
   v('cfg-tournament', tourn >= 2 && tourn <= pop, 'Trebuie 2 ≤ t ≤ pop_size');
   v('cfg-max-depth', parseInt(document.getElementById('cfg-max-depth').value) >= 2, 'Trebuie ≥ 2');
+  if ((terminalMandatory.length + terminalOptionalEnabled.length) <= 0) {
+    validationErrors.push('Trebuie selectat cel puțin un terminal GP');
+  }
 
   // Fitness weights sum
   const fw = getWeights('fitness-weights');
@@ -1370,19 +1678,88 @@ function updateEstimate() {
   const totalNodes = nodeTemplates.reduce((s, nt) => s + (nt.count || 1), 0);
   const evals = pop * gen * train;
 
-  let desc;
-  if (engine === 'deap') {
-    desc = `DEAP: ${pop} indivizi × ${gen} generații × ${train} instanțe = <strong>${evals.toLocaleString()}</strong> simulări. `;
-    desc += `Cluster: ${totalNodes} noduri, ${pods} pods/instanță. `;
-    if (evals < 5000) desc += '⚡ Rapid (< 2 min)';
-    else if (evals < 30000) desc += '⏱️ Moderat (2–10 min)';
-    else desc += '🐢 Lent (> 10 min)';
-  } else {
-    desc = `gplearn: colectare date din ${train} instanțe + regresie simbolică (${pop} pop × ${gen} gen). `;
-    desc += `Cluster: ${totalNodes} noduri, ${pods} pods/instanță. `;
-    desc += '⚡ Rapid (colectare + fit vectorizat)';
-  }
+  let desc = `DEAP: ${pop} indivizi × ${gen} generații × ${train} instanțe = <strong>${evals.toLocaleString()}</strong> simulări. `;
+  desc += `Cluster: ${totalNodes} noduri, ${pods} pods/instanță. `;
+  if (evals < 5000) desc += '⚡ Rapid (< 2 min)';
+  else if (evals < 30000) desc += '⏱️ Moderat (2–10 min)';
+  else desc += '🐢 Lent (> 10 min)';
   document.getElementById('estimate-text').innerHTML = desc;
+}
+
+/* ── GP terminal selector ───────────────────────────────────────────── */
+function normalizeTerminalSets(mandatory, optionalEnabled) {
+  const known = new Set(ALL_GP_TERMINALS);
+  const mandatorySet = new Set((mandatory || []).filter(t => known.has(t)));
+
+  if (mandatorySet.size === 0) {
+    DEFAULT_MANDATORY_TERMINALS.forEach(t => mandatorySet.add(t));
+  }
+
+  let optionalRaw = optionalEnabled;
+  if (optionalRaw === undefined || optionalRaw === null) {
+    optionalRaw = ALL_GP_TERMINALS.filter(t => !mandatorySet.has(t));
+  }
+  const optionalSet = new Set((optionalRaw || []).filter(t => known.has(t) && !mandatorySet.has(t)));
+  return {
+    mandatory: ALL_GP_TERMINALS.filter(t => mandatorySet.has(t)),
+    optionalEnabled: ALL_GP_TERMINALS.filter(t => optionalSet.has(t)),
+  };
+}
+
+function renderTerminalSelector() {
+  const grid = document.getElementById('gp-terminal-grid');
+  if (!grid) return;
+
+  const optionalSet = new Set(terminalOptionalEnabled);
+  grid.innerHTML = '';
+
+  ALL_GP_TERMINALS.forEach(t => {
+    const isMandatory = terminalMandatory.includes(t);
+    const row = document.createElement('label');
+    row.className = 'terminal-item' + (isMandatory ? ' mandatory' : '');
+
+    const checked = isMandatory || optionalSet.has(t);
+    row.innerHTML = `
+      <input type="checkbox" ${checked ? 'checked' : ''} ${isMandatory ? 'disabled' : ''} data-terminal="${t}">
+      <span class="terminal-name">${t}</span>
+      ${isMandatory ? '<span style="margin-left:auto;font-size:.75rem;color:var(--primary)">obligatoriu</span>' : ''}
+    `;
+    grid.appendChild(row);
+  });
+
+  grid.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    if (cb.disabled) return;
+    cb.addEventListener('change', () => {
+      const terminal = cb.dataset.terminal;
+      const next = new Set(terminalOptionalEnabled);
+      if (cb.checked) next.add(terminal);
+      else next.delete(terminal);
+      terminalOptionalEnabled = ALL_GP_TERMINALS.filter(t => next.has(t) && !terminalMandatory.includes(t));
+      updateTerminalSummary();
+      validateAll();
+    });
+  });
+
+  updateTerminalSummary();
+}
+
+function updateTerminalSummary() {
+  const summary = document.getElementById('gp-terminal-summary');
+  if (!summary) return;
+  const activeCount = terminalMandatory.length + terminalOptionalEnabled.length;
+  summary.textContent = `Terminale active: ${activeCount} / ${ALL_GP_TERMINALS.length} (obligatorii: ${terminalMandatory.length}, opționale selectate: ${terminalOptionalEnabled.length})`;
+}
+
+function selectAllOptionalTerminals() {
+  terminalOptionalEnabled = ALL_GP_TERMINALS.filter(t => !terminalMandatory.includes(t));
+  renderTerminalSelector();
+  validateAll();
+}
+
+function clearOptionalTerminals() {
+  terminalOptionalEnabled = [];
+  renderTerminalSelector();
+  validateAll();
 }
 
 /* ── Parse helpers ──────────────────────────────────────────────────── */
@@ -1420,6 +1797,13 @@ function parseNodeLabels(labelsStr) {
 
 /* ── YAML generation ────────────────────────────────────────────────── */
 function generateYaml() {
+  applyOptimizationGuardrails();
+  validateAll();
+  if (validationErrors.length > 0) {
+    document.getElementById('yaml-output').textContent = '# Config invalid - corectează erorile înainte de export.';
+    return document.getElementById('yaml-output').textContent;
+  }
+
   const lines = [];
   const L = (s) => lines.push(s);
 
@@ -1535,6 +1919,8 @@ function generateYaml() {
   L('  max_tree_depth: ' + (parseInt(document.getElementById('cfg-max-depth').value) || 10));
   L('  elitism_ratio: ' + parseFloat(document.getElementById('cfg-elitism').value));
   L('  parsimony_coefficient: ' + (parseFloat(document.getElementById('cfg-parsimony').value) || 0.001));
+  L('  terminal_mandatory: [' + terminalMandatory.map(t => '"' + t + '"').join(', ') + ']');
+  L('  terminal_optional_enabled: [' + terminalOptionalEnabled.map(t => '"' + t + '"').join(', ') + ']');
 
   // Fitness
   L('');
@@ -1795,6 +2181,11 @@ function populateFromConfig(cfg) {
     if (cfg.gp.crossover_prob != null) { document.getElementById('cfg-cx-prob').value = cfg.gp.crossover_prob; document.getElementById('val-cx-prob').textContent = parseFloat(cfg.gp.crossover_prob).toFixed(2); }
     if (cfg.gp.mutation_prob != null) { document.getElementById('cfg-mut-prob').value = cfg.gp.mutation_prob; document.getElementById('val-mut-prob').textContent = parseFloat(cfg.gp.mutation_prob).toFixed(2); }
     if (cfg.gp.elitism_ratio != null) { document.getElementById('cfg-elitism').value = cfg.gp.elitism_ratio; document.getElementById('val-elitism').textContent = parseFloat(cfg.gp.elitism_ratio).toFixed(2); }
+
+    const normalized = normalizeTerminalSets(cfg.gp.terminal_mandatory, cfg.gp.terminal_optional_enabled);
+    terminalMandatory = normalized.mandatory;
+    terminalOptionalEnabled = normalized.optionalEnabled;
+    renderTerminalSelector();
   }
 
   // Fitness
@@ -1821,6 +2212,30 @@ function populateFromConfig(cfg) {
 
 /* ── Presets ─────────────────────────────────────────────────────────── */
 const PRESETS = {
+  optimal: {
+    name: 'baseline_optimal', seed: 42, num_training_instances: 8, num_test_instances: 4,
+    dynamic_instances: true, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [{ count: 6, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0 }] },
+    workload: {
+      total_pods: 84, arrival_rate: 0.9, burst_probability: 0.08, burst_size_min: 2, burst_size_max: 6,
+      cpu_range: [0.1, 1.6], mem_range: [128.0, 3072.0], duration_range: [4.0, 40.0],
+      priority_weights: { low: 0.5, medium: 0.3, high: 0.2 },
+      qos_weights: { best_effort: 0.3, burstable: 0.45, guaranteed: 0.25 },
+      namespaces: ['default', 'production', 'batch'],
+      possible_taints: ['spot'], taint_toleration_probability: 0.5,
+      possible_labels: { disktype: ['ssd', 'hdd'], zone: ['zone-a', 'zone-b'] }, node_selector_probability: 0.12,
+      limit_ratio_min: 1.0, limit_ratio_max: 1.6, limit_probability: 0.35,
+      possible_anti_affinity_keys: ['app-web', 'app-api', 'app-worker'], anti_affinity_probability: 0.20,
+      arrival_pattern: 'diurnal', diurnal_peak_rate: 2.2, diurnal_trough_rate: 0.6,
+      bursty_spike_multiplier: 3.5, bursty_spike_probability: 0.1,
+      profile: ''
+    },
+    gp: { engine: 'deap', population_size: 120, n_generations: 40, tournament_size: 4,
+      crossover_prob: 0.82, mutation_prob: 0.18, max_tree_depth: 9, elitism_ratio: 0.08, parsimony_coefficient: 0.002 },
+    fitness: { alpha_wait_time: 0.3, beta_resource_waste: 0.25, gamma_failed_pods: 0.45 },
+    dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 10.0, recovery_time_max: 30.0,
+      restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
+  },
   smoke: {
     name: 'smoke_test', seed: 42, num_training_instances: 2, num_test_instances: 2,
     dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
@@ -1913,25 +2328,25 @@ const PRESETS = {
       restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
   },
   default: {
-    name: 'baseline_experiment', seed: 42, num_training_instances: 5, num_test_instances: 5,
-    dynamic_instances: false, output_dir: 'tmp/results', output_format: 'csv',
-    cluster: { node_templates: [{ count: 5, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0 }] },
+    name: 'baseline_optimal', seed: 42, num_training_instances: 8, num_test_instances: 4,
+    dynamic_instances: true, output_dir: 'tmp/results', output_format: 'csv',
+    cluster: { node_templates: [{ count: 6, cpu_capacity: 8.0, mem_capacity: 16384.0, cost_per_hour: 1.0 }] },
     workload: {
-      total_pods: 100, arrival_rate: 1.0, burst_probability: 0.1, burst_size_min: 3, burst_size_max: 8,
-      cpu_range: [0.1, 2.0], mem_range: [128.0, 4096.0], duration_range: [5.0, 50.0],
+      total_pods: 84, arrival_rate: 0.9, burst_probability: 0.08, burst_size_min: 2, burst_size_max: 6,
+      cpu_range: [0.1, 1.6], mem_range: [128.0, 3072.0], duration_range: [4.0, 40.0],
       priority_weights: { low: 0.5, medium: 0.3, high: 0.2 },
-      qos_weights: { best_effort: 0.4, burstable: 0.4, guaranteed: 0.2 },
+      qos_weights: { best_effort: 0.3, burstable: 0.45, guaranteed: 0.25 },
       namespaces: ['default', 'production', 'batch'],
-      possible_taints: ['gpu', 'spot', 'dedicated'], taint_toleration_probability: 0.3,
-      possible_labels: { disktype: ['ssd', 'hdd'], zone: ['zone-a', 'zone-b'] }, node_selector_probability: 0.2,
-      limit_ratio_min: 1.0, limit_ratio_max: 2.0, limit_probability: 0.5,
-      possible_anti_affinity_keys: ['app-web', 'app-api', 'app-worker'], anti_affinity_probability: 0.3,
-      arrival_pattern: 'constant', profile: '',
-      diurnal_peak_rate: 3.0, diurnal_trough_rate: 0.3, bursty_spike_multiplier: 5.0, bursty_spike_probability: 0.15
+      possible_taints: ['spot'], taint_toleration_probability: 0.5,
+      possible_labels: { disktype: ['ssd', 'hdd'], zone: ['zone-a', 'zone-b'] }, node_selector_probability: 0.12,
+      limit_ratio_min: 1.0, limit_ratio_max: 1.6, limit_probability: 0.35,
+      possible_anti_affinity_keys: ['app-web', 'app-api', 'app-worker'], anti_affinity_probability: 0.20,
+      arrival_pattern: 'diurnal', profile: '',
+      diurnal_peak_rate: 2.2, diurnal_trough_rate: 0.6, bursty_spike_multiplier: 3.5, bursty_spike_probability: 0.1
     },
-    gp: { engine: 'deap', population_size: 150, n_generations: 50, tournament_size: 3,
-      crossover_prob: 0.8, mutation_prob: 0.2, max_tree_depth: 10, elitism_ratio: 0.05, parsimony_coefficient: 0.001 },
-    fitness: { alpha_wait_time: 0.4, beta_resource_waste: 0.3, gamma_failed_pods: 0.3 },
+    gp: { engine: 'deap', population_size: 120, n_generations: 40, tournament_size: 4,
+      crossover_prob: 0.82, mutation_prob: 0.18, max_tree_depth: 9, elitism_ratio: 0.08, parsimony_coefficient: 0.002 },
+    fitness: { alpha_wait_time: 0.3, beta_resource_waste: 0.25, gamma_failed_pods: 0.45 },
     dynamics: { failure_mode: 'off', failure_rate: 1, recovery_time_min: 10.0, recovery_time_max: 30.0,
       restart_overhead_min: 2.0, restart_overhead_max: 8.0 }
   }
@@ -1962,6 +2377,8 @@ document.getElementById('import-modal').addEventListener('click', function(e) {
 
 /* ── Init ───────────────────────────────────────────────────────────── */
 renderNodeTable();
+renderTerminalSelector();
+loadPreset('optimal');
 updateFitnessWeights();
 validateAll();
 </script>

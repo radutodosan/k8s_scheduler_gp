@@ -35,7 +35,7 @@ class SchedulingMetrics:
     # Throughput tracking
     simulation_duration: float = 0.0
 
-    # Cost tracking: Σ(node.cost_per_hour × uptime_hours) for all nodes
+    # Cost tracking: Σ(run_hours × node.cost_per_hour) per completed pod (placement-based)
     total_cost: float = 0.0
 
     total_wait_time: float = 0.0
@@ -139,6 +139,18 @@ class SchedulingMetrics:
             return 0.0
         return self.total_cost / self.completed_pods
 
+    @property
+    def churn_rate(self) -> float:
+        """Pod churn = (evicted + preempted) / scheduled.
+        
+        Measures cluster instability: pods that were removed from running
+        state. Higher = more churn = worse stability.
+        """
+        if self.scheduled_pods == 0:
+            return 0.0
+        churn_count = self.evicted_pods + self.preemption_count
+        return churn_count / self.scheduled_pods
+
     def to_dict(self) -> Dict[str, object]:
         """Flat dictionary suitable for CSV / JSON export."""
         return {
@@ -158,6 +170,7 @@ class SchedulingMetrics:
             "throughput": round(self.throughput, 4),
             "evicted_pods": self.evicted_pods,
             "preemption_count": self.preemption_count,
+            "churn_rate": round(self.churn_rate, 4),
             "node_failure_count": self.node_failure_count,
             "avg_scheduling_attempts": round(self.avg_scheduling_attempts, 2),
             "total_cost": round(self.total_cost, 4),
@@ -172,6 +185,9 @@ class MetricsCollector:
     def __init__(self) -> None:
         self._metrics = SchedulingMetrics()
         self._current_time: float = 0.0
+        # Track unique pod IDs to avoid double-counting re-scheduled / OOM pods
+        self._scheduled_pod_ids: set[str] = set()
+        self._rejected_pod_ids: set[str] = set()
 
     def set_time(self, t: float) -> None:
         """Update the collector's clock (called by the engine each event)."""
@@ -192,36 +208,52 @@ class MetricsCollector:
 
     def record_scheduling_result(self, result: SchedulingResult) -> None:
         if result.success:
-            self._metrics.scheduled_pods += 1
-            wt = result.pod.wait_time
-            self._metrics.total_wait_time += wt
-            self._metrics.per_pod_wait_times.append(wt)
-            ns = result.pod.namespace
-            self._metrics.scheduled_per_namespace[ns] = (
-                self._metrics.scheduled_per_namespace.get(ns, 0) + 1
-            )
-            pri = result.pod.priority
-            self._metrics.scheduled_per_priority[pri] = (
-                self._metrics.scheduled_per_priority.get(pri, 0) + 1
-            )
+            pod_id = result.pod.pod_id
+            if pod_id not in self._scheduled_pod_ids:
+                # First successful placement for this pod — count it once
+                self._scheduled_pod_ids.add(pod_id)
+                self._metrics.scheduled_pods += 1
+                wt = result.pod.wait_time
+                self._metrics.total_wait_time += wt
+                self._metrics.per_pod_wait_times.append(wt)
+                ns = result.pod.namespace
+                self._metrics.scheduled_per_namespace[ns] = (
+                    self._metrics.scheduled_per_namespace.get(ns, 0) + 1
+                )
+                pri = result.pod.priority
+                self._metrics.scheduled_per_priority[pri] = (
+                    self._metrics.scheduled_per_priority.get(pri, 0) + 1
+                )
         else:
-            self._metrics.rejected_pods += 1
-            reason = result.reason or "unknown"
-            self._metrics.rejection_reasons[reason] = (
-                self._metrics.rejection_reasons.get(reason, 0) + 1
-            )
-            self._metrics.rejection_timeline.append((self._current_time, reason))
+            pod_id = result.pod.pod_id
+            # Only count as rejected if the pod was never successfully placed
+            if pod_id not in self._scheduled_pod_ids and pod_id not in self._rejected_pod_ids:
+                self._rejected_pod_ids.add(pod_id)
+                self._metrics.rejected_pods += 1
+                reason = result.reason or "unknown"
+                self._metrics.rejection_reasons[reason] = (
+                    self._metrics.rejection_reasons.get(reason, 0) + 1
+                )
+                self._metrics.rejection_timeline.append((self._current_time, reason))
 
     def record_pod_completion(self, pod: Pod) -> None:
         self._metrics.completed_pods += 1
 
     def record_pod_rejection(self, pod: Pod, reason: str = "killed_by_failure") -> None:
-        """Record a pod killed / permanently rejected outside normal scheduling."""
-        self._metrics.rejected_pods += 1
-        self._metrics.rejection_reasons[reason] = (
-            self._metrics.rejection_reasons.get(reason, 0) + 1
-        )
-        self._metrics.rejection_timeline.append((self._current_time, reason))
+        """Record a pod permanently killed outside normal scheduling (e.g. OOM).
+
+        Unlike scheduling-time rejection, this records a terminal failure after
+        the pod may already have been scheduled once (for example an OOM kill).
+        We still count it as rejected because the final outcome of that pod was
+        unsuccessful.
+        """
+        if pod.pod_id not in self._rejected_pod_ids:
+            self._rejected_pod_ids.add(pod.pod_id)
+            self._metrics.rejected_pods += 1
+            self._metrics.rejection_reasons[reason] = (
+                self._metrics.rejection_reasons.get(reason, 0) + 1
+            )
+            self._metrics.rejection_timeline.append((self._current_time, reason))
 
     def sample_utilization(self, cluster: ClusterState) -> None:
         """Take a snapshot of cluster resource utilisation."""
@@ -247,3 +279,5 @@ class MetricsCollector:
     def reset(self) -> None:
         self._metrics = SchedulingMetrics()
         self._current_time = 0.0
+        self._scheduled_pod_ids = set()
+        self._rejected_pod_ids = set()

@@ -75,16 +75,16 @@ FUNCTION_SET: Dict[str, tuple] = {
 TERMINAL_NAMES: List[str] = [
     # ── Pod features ─────────────────────────────────────────────────
     "POD_CPU_REQ",       # CPU requested by the pod (cores)
-    "POD_MEM_REQ",       # Memory requested by the pod (MiB)
+    "POD_MEM_REQ",       # Memory requested by the pod (GiB, normalised from MiB÷1024)
     "POD_GPU_REQ",       # GPUs requested by the pod
-    "POD_PRIORITY",      # Priority class (0–1000)
-    "POD_QOS",           # QoS class (1=BE, 2=Burstable, 3=Guaranteed)
-    "POD_WAIT_TIME",     # Time spent in the pending queue
-    "POD_DURATION",      # Expected runtime of the pod
+    "POD_PRIORITY",      # Priority class normalised to [0,1] (raw÷1000)
+    "POD_QOS",           # QoS class normalised to [0,1] (1=BE→0.33, 2=Burst→0.67, 3=Guar→1.0)
+    "POD_WAIT_TIME",     # Normalised wait time w/(w+1) ∈ [0,1)
+    "POD_DURATION",      # Expected runtime ÷100 (≈ [0,1])
 
     # ── Node features ────────────────────────────────────────────────
-    "NODE_CPU_AVAIL",    # CPU available on the candidate node
-    "NODE_MEM_AVAIL",    # Memory available on the candidate node
+    "NODE_CPU_AVAIL",    # CPU available on the candidate node (cores)
+    "NODE_MEM_AVAIL",    # Memory available on the candidate node (GiB, normalised from MiB÷1024)
     "NODE_GPU_AVAIL",    # GPUs available on the candidate node
     "NODE_CPU_UTIL",     # CPU utilisation ratio (0–1)
     "NODE_MEM_UTIL",     # Memory utilisation ratio (0–1)
@@ -147,7 +147,9 @@ def extract_terminal_values(
         Dict terminal_name → float value.
     """
     # Wait time: if the pod is still pending, compute from arrival to now
-    wait_time = current_time - pod.arrival_time if pod.scheduled_time is None else pod.wait_time
+    raw_wait = current_time - pod.arrival_time if pod.scheduled_time is None else pod.wait_time
+    # Normalise to [0, 1) so it's on the same scale as ratio-based terminals
+    wait_time = raw_wait / (raw_wait + 1.0)
 
     # Resource fit: geometric mean of (available / requested) ratios, clamped to [0, 1]
     cpu_fit = (node.cpu_available / pod.cpu_request) if pod.cpu_request > 0 else 1.0
@@ -166,17 +168,29 @@ def extract_terminal_values(
     scheduled = cluster.scheduled_pod_count
     pending_pressure = pending / (pending + scheduled + 1)
 
+    # ── Scale normalisation ──────────────────────────────────────────
+    # All raw-unit terminals are converted to scales comparable with
+    # CPU cores (typically 0–16) and ratio-based terminals (0–1).
+    # Without this, memory values in MiB (0–16384) dominate any
+    # expression that combines them with CPU / ratio features and GP
+    # evolves degenerate single-terminal rules.
+    #
+    #  Memory: MiB → GiB  (÷ 1024)     e.g. 8192 MiB → 8.0 GiB
+    #  Priority: raw int → [0,1]  (÷ 1000)
+    #  Duration: simulation units → fraction  (÷ 100)
+    mem_gib_scale = 1024.0
+
     return {
         "POD_CPU_REQ":      pod.cpu_request,
-        "POD_MEM_REQ":      pod.mem_request,
+        "POD_MEM_REQ":      pod.mem_request / mem_gib_scale,  # GiB
         "POD_GPU_REQ":      pod.gpu_request,
-        "POD_PRIORITY":     float(pod.priority),
-        "POD_QOS":          float(pod.qos_class.value),
-        "POD_WAIT_TIME":    wait_time,
-        "POD_DURATION":     pod.duration,
+        "POD_PRIORITY":     float(pod.priority) / 1000.0,     # [0, 1]
+        "POD_QOS":          float(pod.qos_class.value) / 3.0, # [0, 1]
+        "POD_WAIT_TIME":    wait_time,                         # [0, 1)
+        "POD_DURATION":     pod.duration / 100.0,              # ≈ [0, 1]
 
         "NODE_CPU_AVAIL":   node.cpu_available,
-        "NODE_MEM_AVAIL":   node.mem_available,
+        "NODE_MEM_AVAIL":   node.mem_available / mem_gib_scale,  # GiB
         "NODE_GPU_AVAIL":   node.gpu_available,
         "NODE_CPU_UTIL":    node.cpu_utilization,
         "NODE_MEM_UTIL":    node.mem_utilization,

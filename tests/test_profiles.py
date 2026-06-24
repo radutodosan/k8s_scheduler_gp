@@ -148,7 +148,7 @@ class TestProfileGeneration:
         assert len(pods) == 30
         for p in pods:
             assert p.cpu_request >= 2.0
-            assert p.mem_request >= 4096.0
+            assert p.mem_request >= 2048.0  # range lowered to [2048, 8192] for cluster fit
             assert p.workload_type == "ai_training"
 
     def test_ci_cd_profile_short_duration(self, gen):

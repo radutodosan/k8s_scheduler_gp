@@ -108,7 +108,7 @@ class SimulationEngine:
     def build_cluster(self) -> None:
         """Create nodes from the cluster configuration."""
         node_idx = 0
-        for template in self._cluster_config.node_templates:
+        for template in self._cluster_config.effective_templates():
             for _ in range(template.count):
                 node = Node(
                     node_id=f"node-{node_idx:03d}",
@@ -121,7 +121,7 @@ class SimulationEngine:
                 )
                 self._cluster.add_node(node)
                 node_idx += 1
-        logger.info("Cluster built: %d nodes", self._cluster.node_count)
+        logger.debug("Cluster built: %d nodes", self._cluster.node_count)
 
     def load_workload(self, pods: List[Pod]) -> None:
         """Inject pod arrival events into the event queue."""
@@ -150,7 +150,7 @@ class SimulationEngine:
         if self._dynamics and self._dynamics.enabled and pods:
             self._schedule_all_failures(pods)
 
-        logger.info("Loaded %d pods into event queue", len(pods))
+        logger.debug("Loaded %d pods into event queue", len(pods))
 
     def run(self) -> None:
         """Execute the simulation until all events are processed."""
@@ -186,20 +186,16 @@ class SimulationEngine:
 
         # Record simulation duration for throughput calculation
         self._collector._metrics.simulation_duration = self._current_time
+        # total_cost is accumulated incrementally in _handle_pod_completion
+        # (placement-based: run_hours × node.cost_per_hour per completed pod)
 
-        # Compute total infrastructure cost: Σ(cost_per_hour × uptime_hours)
-        sim_hours = self._current_time / 3600.0 if self._current_time > 0 else 0.0
-        total_cost = 0.0
-        for node in self._cluster.nodes.values():
-            total_cost += node.cost_per_hour * sim_hours
-        self._collector._metrics.total_cost = total_cost
-
-        logger.info(
-            "Simulation finished at t=%.2f  scheduled=%d rejected=%d completed=%d",
+        metrics = self._collector.get_metrics()
+        logger.debug(
+            "Simulation finished at t=%.2f  scheduled_total=%d rejected_total=%d completed_total=%d",
             self._current_time,
-            self._cluster.scheduled_pod_count,
-            self._cluster.rejected_pod_count,
-            self._cluster.completed_pod_count,
+            metrics.scheduled_pods,
+            metrics.rejected_pods,
+            metrics.completed_pods,
         )
 
     # ── Event handlers ───────────────────────────────────────────────
@@ -229,6 +225,13 @@ class SimulationEngine:
                     self._current_time, pod.pod_id, expected,
                 )
                 return
+        # Accumulate placement-based cost: actual run time × node rate.
+        # Doing this before release_pod so assigned_node_id is still set.
+        if pod.assigned_node_id and pod.scheduled_time is not None:
+            node = self._cluster.nodes.get(pod.assigned_node_id)
+            if node is not None:
+                run_hours = (self._current_time - pod.scheduled_time) / 3600.0
+                self._collector._metrics.total_cost += run_hours * node.cost_per_hour
         self._cluster.release_pod(pod, self._current_time)
         self._collector.record_pod_completion(pod)
         logger.debug("t=%.2f  POD_COMPLETION %s", self._current_time, pod.pod_id)
@@ -263,36 +266,13 @@ class SimulationEngine:
 
             if node_id is not None:
                 result = self._cluster.bind_pod(pod, node_id, self._current_time)
-                self._collector.record_scheduling_result(result)
 
-                if result.success and pod.duration > 0:
-                    rd = pod.remaining_duration
-                    if rd > 0:
-                        # Schedule the pod's completion event
-                        self._queue.push(
-                            Event(
-                                timestamp=self._current_time + rd,
-                                priority=PRIORITY_POD_COMPLETION,
-                                event_type=EventType.POD_COMPLETION,
-                                payload=pod,
-                            )
-                        )
-                    else:
-                        # Pod already served its full duration through
-                        # partial execution stints — complete immediately.
-                        self._cluster.release_pod(pod, self._current_time)
-                        self._collector.record_pod_completion(pod)
-                self._pending_cycles.pop(pod.pod_id, None)
-
-            else:
-                # No feasible node — try priority preemption
-                preempted_node = self._try_preemption(pod)
-                if preempted_node is not None:
-                    result = self._cluster.bind_pod(pod, preempted_node, self._current_time)
+                if result.success:
                     self._collector.record_scheduling_result(result)
-                    if result.success and pod.duration > 0:
+                    if pod.duration > 0:
                         rd = pod.remaining_duration
                         if rd > 0:
+                            # Schedule the pod's completion event
                             self._queue.push(
                                 Event(
                                     timestamp=self._current_time + rd,
@@ -302,9 +282,58 @@ class SimulationEngine:
                                 )
                             )
                         else:
+                            # Pod already served its full duration through
+                            # partial execution stints — complete immediately.
+                            if pod.assigned_node_id and pod.scheduled_time is not None:
+                                _node = self._cluster.nodes.get(pod.assigned_node_id)
+                                if _node is not None:
+                                    _rh = (self._current_time - pod.scheduled_time) / 3600.0
+                                    self._collector._metrics.total_cost += _rh * _node.cost_per_hour
                             self._cluster.release_pod(pod, self._current_time)
                             self._collector.record_pod_completion(pod)
                     self._pending_cycles.pop(pod.pod_id, None)
+                else:
+                    # bind_pod failed (e.g. anti-affinity race) — retry next cycle
+                    logger.debug(
+                        "t=%.2f  bind_pod failed for %s on %s: %s",
+                        self._current_time, pod.pod_id, node_id, result.reason,
+                    )
+                    still_pending.append(pod)
+
+            else:
+                # No feasible node — try priority preemption
+                preempted_node = self._try_preemption(pod)
+                if preempted_node is not None:
+                    result = self._cluster.bind_pod(pod, preempted_node, self._current_time)
+                    if result.success:
+                        self._collector.record_scheduling_result(result)
+                        if pod.duration > 0:
+                            rd = pod.remaining_duration
+                            if rd > 0:
+                                self._queue.push(
+                                    Event(
+                                        timestamp=self._current_time + rd,
+                                        priority=PRIORITY_POD_COMPLETION,
+                                        event_type=EventType.POD_COMPLETION,
+                                        payload=pod,
+                                    )
+                                )
+                            else:
+                                if pod.assigned_node_id and pod.scheduled_time is not None:
+                                    _node = self._cluster.nodes.get(pod.assigned_node_id)
+                                    if _node is not None:
+                                        _rh = (self._current_time - pod.scheduled_time) / 3600.0
+                                        self._collector._metrics.total_cost += _rh * _node.cost_per_hour
+                                self._cluster.release_pod(pod, self._current_time)
+                                self._collector.record_pod_completion(pod)
+                        self._pending_cycles.pop(pod.pod_id, None)
+                    else:
+                        # bind_pod failed after preemption (e.g. anti-affinity) — retry
+                        logger.debug(
+                            "t=%.2f  bind_pod failed after preemption for %s on %s: %s",
+                            self._current_time, pod.pod_id, preempted_node, result.reason,
+                        )
+                        still_pending.append(pod)
                 else:
                     # No preemption possible — check retry limit
                     self._pending_cycles[pod.pod_id] = (
@@ -380,6 +409,12 @@ class SimulationEngine:
                 to_evict.append(victim)
 
             if freed_cpu >= pod.cpu_request and freed_mem >= pod.mem_request:
+                # Also verify anti-affinity against the pods that would remain
+                if pod.anti_affinity_key:
+                    evict_ids = {p.pod_id for p in to_evict}
+                    remaining = [p for p in node.pods.values() if p.pod_id not in evict_ids]
+                    if any(p.anti_affinity_key == pod.anti_affinity_key for p in remaining):
+                        continue  # anti-affinity violation with surviving pods
                 if len(to_evict) < best_evict_count:
                     best_evict_count = len(to_evict)
                     best_node_id = node.node_id
@@ -456,16 +491,6 @@ class SimulationEngine:
 
     # ── Node failure / recovery ──────────────────────────────────────
 
-    def _has_active_workload(self) -> bool:
-        """Check whether there are pods still being processed."""
-        if self._total_pods_loaded == 0:
-            return False
-        terminal = sum(
-            1 for p in self._cluster.all_pods.values()
-            if p.status in (PodStatus.COMPLETED, PodStatus.REJECTED)
-        )
-        return terminal < self._total_pods_loaded
-
     def _schedule_all_failures(self, pods: List[Pod]) -> None:
         """Pre-schedule a fixed number of node failure events.
 
@@ -540,7 +565,7 @@ class SimulationEngine:
                 self._cluster.pending_pods.append(pod)
                 self._pending_cycles[pod.pod_id] = 0
 
-        logger.info(
+        logger.debug(
             "t=%.2f  NODE_FAILURE %s (%d pods evicted, mode=%s)",
             self._current_time, node.node_id, len(evicted), mode,
         )
@@ -573,7 +598,7 @@ class SimulationEngine:
         """A failed node comes back online."""
         node = self._cluster.nodes[node_id]
         node.mark_recovered()
-        logger.info("t=%.2f  NODE_RECOVERY %s", self._current_time, node_id)
+        logger.debug("t=%.2f  NODE_RECOVERY %s", self._current_time, node_id)
 
         # Trigger schedule cycle to place pending pods on recovered node
         self._queue.push(

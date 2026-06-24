@@ -47,6 +47,16 @@ body {
   min-height: 100vh;
 }
 
+/* Dark mode scrollbars (Webkit + Firefox) */
+[data-theme="dark"] {
+  color-scheme: dark;
+  scrollbar-color: #475569 #1e293b;
+}
+[data-theme="dark"] ::-webkit-scrollbar { width: 8px; height: 8px; }
+[data-theme="dark"] ::-webkit-scrollbar-track { background: #1e293b; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
 /* Header */
 .app-header {
   background: var(--surface);
@@ -136,6 +146,19 @@ body {
   background: var(--surface2); font-weight: 600;
   position: sticky; top: 0; z-index: 2;
 }
+.data-table th.sortable:hover { background: var(--border); }
+.data-table th.sortable .sort-arrow { color: var(--text2); font-size: .8em; }
+.data-table td:first-child {
+  position: sticky; left: 0; z-index: 1;
+  background: var(--surface2);
+  border-right: 2px solid var(--border);
+}
+.data-table th:first-child {
+  position: sticky; left: 0; z-index: 3;
+  background: var(--surface2);
+  border-right: 2px solid var(--border);
+}
+.data-table tr:hover td:first-child { background: var(--border); }
 .data-table tr:hover td { background: var(--surface2); }
 .data-table-wrap {
   max-height: 500px; overflow: auto; border: 1px solid var(--border);
@@ -158,6 +181,7 @@ body {
 
 /* Split layout */
 .split-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
+.split-layout > * { min-width: 0; }
 @media (max-width: 900px) { .split-layout { grid-template-columns: 1fr; } }
 .split-sidebar { max-height: calc(100vh - 160px); overflow-y: auto; }
 
@@ -167,6 +191,8 @@ body {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 12px;
   position: relative;
+  min-width: 0;
+  overflow: hidden;
 }
 .chart-card canvas { width: 100% !important; height: 260px !important; }
 .chart-card img { width: 100%; border-radius: 4px; cursor: pointer; }
@@ -194,11 +220,57 @@ body {
   padding: 14px 16px; border-radius: var(--radius);
   font-family: 'Cascadia Code', 'Fira Code', monospace;
   font-size: .82rem; overflow-x: auto; white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   max-height: 400px; overflow-y: auto; line-height: 1.6;
 }
 
+/* Tooltips — same system as configurator.html */
+.tip {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--surface2); border: 1px solid var(--border);
+  font-size: .68rem; cursor: help; color: var(--text2);
+  flex-shrink: 0; position: relative; vertical-align: middle; margin-left: 3px;
+}
+.tip[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute; bottom: calc(100% + 8px); left: 50%;
+  transform: translateX(-50%);
+  background: var(--code-bg); color: var(--code-text);
+  padding: 7px 11px; border-radius: 6px;
+  font-size: .78rem; font-weight: 400; line-height: 1.45;
+  white-space: normal; width: max-content; max-width: 300px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 600;
+}
+.tip[data-tip]:hover::after { opacity: 1; }
+.tip[data-tip]::before {
+  content: ''; position: absolute; bottom: calc(100% + 2px); left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: var(--code-bg);
+  opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 600;
+}
+.tip[data-tip]:hover::before { opacity: 1; }
+
 /* Convergence chart inline */
-.convergence-mini { height: 200px; }
+.convergence-mini {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+.convergence-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+#expDetailContainer,
+#expDetail {
+  min-width: 0;
+}
 
 /* Loading spinner */
 .loading {
@@ -453,7 +525,7 @@ function renderOverview() {
       label: `Rulare: ${nRows} rezultate`,
       badge: 'info',
       badgeText: 'RUN',
-      detail: r.rule ? r.rule.split('\n').find(l => l.includes('Fitness'))?.trim() || '' : '',
+      detail: r.rule ? r.rule.split('\n').find(l => l.includes('Quality') || l.includes('Fitness'))?.trim() || '' : '',
     });
   });
   expsData.slice(0, 3).forEach(e => {
@@ -597,15 +669,42 @@ async function showRun(idx) {
     <button class="btn btn-sm" style="margin-left:8px" onclick="downloadCSV(runsData[${idx}].csv, '${r.name}_results.csv')">⬇ Export CSV</button>
   </h3>`;
 
-  // GP rule
-  if (r.rule) {
+  // GP rule(s)
+  const gpStrategies = new Set((r.csv || []).map(x => x.strategy).filter(s => /^GP\(/.test(s)));
+  const hasDeap = gpStrategies.has('GP(deap)');
+
+  if (r.rules && Object.keys(r.rules).length) {
+    for (const engine of Object.keys(r.rules)) {
+      html += `<h4>Regula GP Evoluată (${escHtml(engine)})</h4><div class="code-block">${escHtml(r.rules[engine])}</div>`;
+    }
+  } else if (r.rule) {
     html += `<h4>Regula GP Evoluată</h4><div class="code-block">${escHtml(r.rule)}</div>`;
+  } else if (hasDeap) {
+    html += `<h4>Regula GP Evoluată (deap)</h4><div class="code-block">Nu s-a găsit fișierul de regulă în acest run.</div>`;
   }
 
   // Results table
   if (r.csv && r.csv.length) {
     html += `<h4>Rezultate Strategii</h4>`;
-    html += renderCSVTable(r.csv);
+    const instanceIds = [...new Set(r.csv.map(x => x.instance_id))].sort();
+    html += `<p style="font-size:.8rem;color:var(--text2);margin-bottom:6px;">
+      <strong>quality_score</strong> = scorul pe instanța de test.
+      ${instanceIds.length} instanțe de test — câte un tabel per instanță, click pe header pentru sortare.
+    </p>`;
+    if (instanceIds.length > 1) {
+      instanceIds.forEach(instId => {
+        const rows = r.csv.filter(x => x.instance_id === instId);
+        html += `<details open style="margin-bottom:8px;">
+          <summary style="cursor:pointer;font-weight:600;font-size:.85rem;padding:4px 0;">
+            Instanță: <code>${escHtml(instId)}</code>
+            <span style="font-weight:400;color:var(--text2);margin-left:8px;">(${rows.length} strategii)</span>
+          </summary>
+          ${renderCSVTable(rows)}
+        </details>`;
+      });
+    } else {
+      html += renderCSVTable(r.csv);
+    }
 
     // Build interactive bar chart
     html += `<h4>Comparație Strategii</h4>`;
@@ -625,24 +724,34 @@ async function showRun(idx) {
         <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('runChart3')">⬇</button></div>
         <canvas id="runChart3"></canvas>
       </div>
+      <div class="chart-card">
+        <div class="chart-title">Quality Score</div>
+        <div class="chart-actions"><button class="btn btn-sm" onclick="downloadChart('runChart4')">⬇</button></div>
+        <canvas id="runChart4"></canvas>
+      </div>
     </div>`;
   }
 
-  // Images
+  // Images grouped by strategy
   if (r.images && r.images.length) {
-    html += `<h4>Grafice Generate</h4><div class="chart-grid">`;
-    for (const imgPath of r.images) {
-      const fname = imgPath.split('/').pop();
-      html += `<div class="chart-card" id="imgcard-${fname}">
-        <div class="chart-title">${escHtml(fname.replace(/_/g, ' ').replace('.png',''))}</div>
-        <div class="chart-actions">
-          <button class="btn btn-sm" onclick="downloadImageFromCard('imgcard-${fname}')">⬇</button>
-        </div>
-        <img data-src="${imgPath}" class="lazy-img" alt="${fname}"
-             onclick="openModal(this.src, '${fname}')">
-      </div>`;
+    const groupedImages = groupRunImagesByStrategy(r.images);
+    html += `<h4>Grafice Generate (${r.images.length})</h4>`;
+    for (const [strategyName, paths] of Object.entries(groupedImages)) {
+      html += `<h4 style="margin-top:10px;">${escHtml(strategyName)} (${paths.length})</h4><div class="chart-grid">`;
+      for (const imgPath of paths) {
+        const fname = getFileName(imgPath);
+        const cardId = 'imgcard-' + toSafeId(imgPath);
+        html += `<div class="chart-card" id="${cardId}">
+          <div class="chart-title">${escHtml(fname)}</div>
+          <div class="chart-actions">
+            <button class="btn btn-sm" onclick="downloadImageFromCard('${cardId}')">⬇</button>
+          </div>
+          <img data-src="${imgPath}" class="lazy-img" alt="${fname}"
+               onclick="openModal(this.src, '${fname}')">
+        </div>`;
+      }
+      html += `</div>`;
     }
-    html += `</div>`;
   }
 
   document.getElementById('runDetail').innerHTML = html;
@@ -665,10 +774,12 @@ async function buildRunCharts(csv) {
   destroyChart('runChart1');
   destroyChart('runChart2');
   destroyChart('runChart3');
+  destroyChart('runChart4');
 
   buildBarChart('runChart1', strategies, strategies.map(s => stratData[s].scheduling_success_rate), colors, 'Sched. Success Rate');
   buildBarChart('runChart2', strategies, strategies.map(s => stratData[s].avg_wait_time), colors, 'Avg Wait Time');
   buildBarChart('runChart3', strategies, strategies.map(s => stratData[s].avg_cpu_utilization), colors, 'Avg CPU Util.');
+  buildBarChart('runChart4', strategies, strategies.map(s => stratData[s].quality_score), colors, 'Quality Score');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -682,9 +793,13 @@ function renderExpList() {
   }
   list.innerHTML = expsData.map((e, i) => {
     const nExp = e.experiments ? e.experiments.length : 0;
+    const seedCount = (e.seeds || []).length;
     return `<li class="result-item" onclick="showExperiment(${i})">
-      <div class="item-name">${escHtml(formatTimestamp(e.name))}</div>
-      <div class="item-meta"><span>${nExp} exp.</span></div>
+      <div class="item-name">${sweepTitle(e)}</div>
+      <div class="item-meta">
+        <span>${nExp} exp.</span>
+        ${seedCount ? `<span>${seedCount} seeds</span>` : ''}
+      </div>
     </li>`;
   }).join('');
 }
@@ -695,72 +810,487 @@ async function showExperiment(idx) {
     el.classList.toggle('active', i === idx);
   });
 
-  let html = `<h3>Sweep: ${escHtml(formatTimestamp(e.name))}
-    <button class="btn btn-sm" style="margin-left:8px" onclick="downloadCSV(expsData[${idx}].combined_csv, '${e.name}_combined.csv')">⬇ Export CSV</button>
-  </h3>`;
+  const msLabel = e.is_multiseed
+    ? `<span class="badge badge-info" style="margin-left:8px">${(e.seeds||[]).length} seeds</span>`
+    : '';
+  const csvBtn = (e.multiseed_csv || e.combined_csv)
+    ? `<button class="btn btn-sm" style="margin-left:8px"
+        onclick="downloadCSV(expsData[${idx}].multiseed_csv || expsData[${idx}].combined_csv, '${e.name}_results.csv')">⬇ Export CSV</button>`
+    : '';
+  let html = `<h3>${sweepTitle(e)} ${msLabel} ${csvBtn}</h3>`;
 
   // Summary stats
   if (e.experiments && e.experiments.length) {
-    const groups = [...new Set(e.experiments.map(x => x.metadata?.group || 'unknown'))];
+    const metaGroups = [...new Set(e.experiments.map(x => (x.metadata?.group || x.gp_rule?.group || 'unknown')))];
+    const totalRows = e.multiseed_csv ? e.multiseed_csv.length : (e.combined_csv ? e.combined_csv.length : 0);
+    const seedsCount = (e.seeds || []).length;
+    // Total GP training time across all experiments and seeds
+    const totalGpSec = e.experiments.reduce((sum, exp) => {
+      const seeds = exp.all_rules || (exp.gp_rule ? [exp.gp_rule] : []);
+      return sum + seeds.reduce((s, r) => s + (r.training_time_s || 0), 0);
+    }, 0);
+    const gpTimeLabel = totalGpSec > 3600
+      ? `${(totalGpSec/3600).toFixed(1)}h`
+      : totalGpSec > 60 ? `${Math.round(totalGpSec/60)}min` : `${Math.round(totalGpSec)}s`;
     html += `<div class="stats-row">
       <div class="stat-card"><div class="stat-value">${e.experiments.length}</div><div class="stat-label">Experimente</div></div>
-      <div class="stat-card"><div class="stat-value">${groups.length}</div><div class="stat-label">Grupuri</div></div>
-      <div class="stat-card"><div class="stat-value">${e.combined_csv ? e.combined_csv.length : 0}</div><div class="stat-label">Rezultate Totale</div></div>
+      ${seedsCount ? `<div class="stat-card"><div class="stat-value">${seedsCount}</div><div class="stat-label">Seeds</div></div>` : ''}
+      <div class="stat-card"><div class="stat-value">${metaGroups.length}</div><div class="stat-label">Grupuri</div></div>
+      <div class="stat-card"><div class="stat-value">${totalRows}</div><div class="stat-label">Rezultate Totale</div></div>
+      ${totalGpSec > 0 ? `<div class="stat-card" title="Suma timpilor de antrenament GP pentru toate experimentele și seeds-urile (nu include evaluarea baseline-urilor)"><div class="stat-value">${gpTimeLabel}</div><div class="stat-label">Timp GP total</div></div>` : ''}
     </div>`;
 
-    // Group filter pills
-    html += `<div class="group-pills" id="groupPills">
-      <span class="group-pill active" onclick="filterExpGroup('all', ${idx})">Toate</span>
-      ${groups.map(g => `<span class="group-pill" onclick="filterExpGroup('${g}', ${idx})">${escHtml(g)}</span>`).join('')}
+    // Group filter pills + "Despre rulare" button
+    const aboutId = 'about_' + idx;
+    html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+      <div class="group-pills" id="groupPills" style="margin-bottom:0;flex:1;">
+        <span class="group-pill active" onclick="filterExpGroup('all', ${idx})">Toate</span>
+        ${metaGroups.map(g => `<span class="group-pill" onclick="filterExpGroup('${g}', ${idx})">${escHtml(g)}</span>`).join('')}
+      </div>
+      <button class="btn btn-sm" onclick="toggleAbout('${aboutId}')"
+        style="white-space:nowrap;font-size:.75rem;">Despre rulare</button>
+    </div>
+    <div id="${aboutId}" style="display:none;margin-bottom:10px;">
+      ${buildAboutPanel(e)}
     </div>`;
 
     // Per-experiment cards
     html += `<div id="expCards">`;
     for (const exp of e.experiments) {
       const m = exp.metadata || {};
-      html += `<div class="card exp-card" data-group="${m.group || 'unknown'}" style="margin-bottom:10px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <div>
-            <strong>${escHtml(exp.name)}</strong>
-            <span class="badge badge-info" style="margin-left:6px">${escHtml(m.group || '?')}</span>
-          </div>
-          <div style="font-size:.8rem;color:var(--text2)">
-            ${m.engine || '?'} | pop=${m.population_size || '?'} gen=${m.n_generations || '?'} | ${m.total_pods || '?'} pods
-          </div>
-        </div>`;
+      const r = exp.gp_rule || {};
+      const group = m.group || r.group || 'unknown';
+      const fitness = m.best_fitness !== undefined ? m.best_fitness : r.best_fitness;
+      const expr = m.best_expression || r.best_expression;
 
-      // Metadata summary
-      if (m.best_fitness !== undefined) {
-        html += `<div style="display:flex;gap:16px;font-size:.82rem;margin-bottom:6px;flex-wrap:wrap;">
-          <span>Fitness: <strong>${Number(m.best_fitness).toFixed(4)}</strong></span>
-          <span>Timp: <strong>${Number(m.training_time_s || 0).toFixed(2)}s</strong></span>
-          <span>α=${m.alpha} β=${m.beta} γ=${m.gamma}</span>
-        </div>`;
+      // GP rank in summary (1 = best)
+      const summary = exp.results_summary || [];
+      const gpRank = summary.findIndex(s => s.strategy && (s.strategy.includes('GP') || s.strategy.includes('deap'))) + 1;
+      const rankColor = gpRank === 1 ? '#22c55e' : gpRank === 2 ? '#f59e0b' : '#ef4444';
+      const rankBadge = gpRank > 0
+        ? `<span style="margin-left:6px;font-size:.7rem;font-weight:700;color:${rankColor}">#${gpRank}</span>`
+        : '';
+      const gpMean = summary.find(s => s.strategy && (s.strategy.includes('GP') || s.strategy.includes('deap')));
+      const qualityLabel = gpMean
+        ? `<span style="font-size:.78rem;margin-left:8px">mean <strong>${gpMean.mean}</strong></span>`
+        : (fitness !== undefined ? `<span style="font-size:.78rem;margin-left:8px">fit <strong>${Number(fitness).toFixed(4)}</strong></span>` : '');
+
+      html += `<div class="card exp-card" data-group="${group}" style="margin-bottom:6px;padding:0;overflow:hidden;">
+        <details>
+        <summary style="padding:8px 12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;list-style:none;user-select:none;">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <strong style="font-size:.88rem;">${escHtml(exp.name)}</strong>
+            <span class="badge badge-info" style="font-size:.68rem">${escHtml(group)}</span>
+            ${rankBadge}${qualityLabel}
+          </div>
+          <div style="font-size:.75rem;color:var(--text2);white-space:nowrap;margin-left:8px;">
+            ${m.total_pods ? `${m.total_pods}p` : ''}${m.n_generations ? ` · ${m.n_generations}gen` : ''}
+            ${r.training_time_s ? ` · <span title="Timp antrenament GP pentru un singur seed (nu include evaluarea baseline-urilor sau celelalte seeds)">GP: ${Number(r.training_time_s).toFixed(0)}s/seed</span>` : ''}
+            ${(() => {
+              const conv = exp.convergence;
+              if (!conv || conv.length < 2) return '';
+              const delta = (conv[conv.length-1].max - conv[0].max);
+              if (Math.abs(delta) < 0.0001) return '';
+              const col = delta > 0.01 ? '#22c55e' : delta > 0 ? '#86efac' : '#f87171';
+              return ` · <span style="color:${col}" title="Îmbunătățire fitness gen0→final (primul seed)">Δ${delta >= 0 ? '+' : ''}${delta.toFixed(3)}</span>`;
+            })()}
+          </div>
+        </summary>
+        <div style="padding:8px 12px 10px;">`;
+
+      // GP expression (best rule) with semantic coloring
+      if (expr) {
+        html += `<div class="code-block" style="font-size:.75rem;max-height:80px;margin-bottom:6px;overflow:auto;">${colorizeRule(expr)}</div>`;
       }
 
-      // Expression
-      if (m.best_expression) {
-        html += `<div class="code-block" style="font-size:.75rem;max-height:60px;margin-bottom:6px;">${escHtml(m.best_expression)}</div>`;
+      // All rules across seeds (Rules Explorer)
+      if (exp.all_rules && exp.all_rules.length > 1) {
+        const rulesId = 'rules_' + exp.name.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Math.random().toString(36).slice(2,6);
+        html += `<details style="margin-bottom:6px;">
+          <summary style="cursor:pointer;font-size:.8rem;color:var(--primary)">
+            Toate regulile (${exp.all_rules.length} seeds)
+          </summary>
+          <table style="width:100%;font-size:.75rem;border-collapse:collapse;margin-top:4px;">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:4px 6px;text-align:left;border:1px solid var(--border)">Seed</th>
+              <th style="padding:4px 6px;text-align:right;border:1px solid var(--border)">Fitness</th>
+              <th style="padding:4px 6px;text-align:left;border:1px solid var(--border)">Regula evoluata</th>
+            </tr></thead>
+            <tbody>
+            ${exp.all_rules.map(r => `
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:3px 6px;color:var(--text2)">${r.seed ?? '?'}</td>
+                <td style="padding:3px 6px;text-align:right;font-weight:600">${Number(r.best_fitness||0).toFixed(4)}</td>
+                <td style="padding:3px 6px;font-family:monospace;white-space:pre-wrap;max-width:400px;">${colorizeRule(r.best_expression||'')}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </details>`;
       }
 
       // Convergence mini-chart
       if (exp.convergence && exp.convergence.length > 1) {
         const cid = 'conv_' + exp.name.replace(/[^a-zA-Z0-9]/g, '_');
-        html += `<div style="display:flex;gap:8px;align-items:flex-end;">
-          <canvas id="${cid}" class="convergence-mini" style="flex:1;height:120px;"></canvas>
-          <button class="btn btn-sm" onclick="downloadChart('${cid}')" style="align-self:start;">⬇</button>
+        html += `<div>
+          <div style="font-size:.7rem;color:var(--text2);margin-bottom:2px;">
+            Convergenta GP (seed ${exp.gp_rule?.seed || '?'}) — best / avg
+            <span class="tip" data-tip="best = cel mai bun arbore GP la fiecare generație (pe training). avg = media întregii populații. Dacă avg ≈ best = convergență prematură.">?</span>
+          </div>
+          <div class="convergence-row">
+            <div style="position:relative;height:120px;flex:1;min-width:0;">
+              <canvas id="${cid}" class="convergence-mini"></canvas>
+            </div>
+            <button class="btn btn-sm" onclick="downloadChart('${cid}')" style="align-self:start;flex:0 0 auto;">⬇</button>
+          </div>
         </div>`;
       }
 
-      // Results table (collapsed)
+      // Results — seed-selector tabs (Toate = aggregated summary, each seed = per-instance)
       if (exp.results && exp.results.length) {
+        const expSeeds = [...new Set(exp.results.map(x => x.run_seed))].filter(Boolean).sort();
+        const tbId = 'rt_' + exp.name.replace(/[^a-zA-Z0-9]/g, '_');
+        const totalRows = exp.results.length;
+
+        html += `<div style="margin-top:8px;">`;
+
+        // Tab pills
+        html += `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px;align-items:center;">
+          <span style="font-size:.72rem;color:var(--text2);margin-right:2px;">Seed:</span>
+          <button class="btn btn-sm" id="${tbId}_pill_all" data-tbbase="${tbId}" data-tbid="all"
+            onclick="selectSeedTab('${tbId}','all')"
+            style="font-size:.7rem;padding:1px 7px;background:var(--primary);color:#fff;">Toate</button>
+          ${expSeeds.map(s => `<button class="btn btn-sm" id="${tbId}_pill_${s}" data-tbbase="${tbId}" data-tbid="${s}"
+            onclick="selectSeedTab('${tbId}','${s}')"
+            style="font-size:.7rem;padding:1px 7px;">${escHtml(s.replace('seed_',''))}</button>`).join('')}
+        </div>`;
+
+        // Tab "Toate" — per-seed summaries first, then aggregated
+        html += `<div id="${tbId}_all">`;
+
+        // Helper: renders a mean/std/N table for a given summary array
+        const renderSummaryTable = (summaryRows) => {
+          if (!summaryRows || !summaryRows.length) return '';
+          return `<table style="width:100%;border-collapse:collapse;font-size:.78rem;">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:3px 8px;text-align:left;border:1px solid var(--border)">Strategie</th>
+              <th style="padding:3px 8px;text-align:right;border:1px solid var(--border)">
+                Mean <span class="tip" data-tip="Media quality score-ului. Quality = 1 − (α·wait + β·waste + γ·reject). Mai mare = mai bun (max 1.0).">?</span>
+              </th>
+              <th style="padding:3px 8px;text-align:right;border:1px solid var(--border)">
+                Median <span class="tip" data-tip="Mediana quality score-ului. Mai robustă decât media la outlieri — dacă o instanță de test e atipică, mediana nu e afectată.">?</span>
+              </th>
+              <th style="padding:3px 8px;text-align:right;border:1px solid var(--border)">
+                ±Std <span class="tip" data-tip="Deviația standard. Std mic = rezultate consistente.">?</span>
+              </th>
+              <th style="padding:3px 8px;text-align:right;border:1px solid var(--border)">
+                N <span class="tip" data-tip="Numărul de măsurători (instanțe de test).">?</span>
+              </th>
+            </tr></thead>
+            <tbody>
+            ${summaryRows.map((r,i) => {
+              const isGP = r.strategy.includes('GP') || r.strategy.includes('deap');
+              const isFirst = i === 0;
+              return `<tr style="${isFirst?'background:rgba(99,102,241,.07)':''}${isGP?';font-weight:600':''}">
+                <td style="padding:3px 8px;border:1px solid var(--border)">${escHtml(r.strategy)}</td>
+                <td style="padding:3px 8px;text-align:right;border:1px solid var(--border)">${r.mean}</td>
+                <td style="padding:3px 8px;text-align:right;border:1px solid var(--border)">${r.median ?? '-'}</td>
+                <td style="padding:3px 8px;text-align:right;border:1px solid var(--border);color:var(--text2)">${r.std}</td>
+                <td style="padding:3px 8px;text-align:right;border:1px solid var(--border);color:var(--text2)">${r.n}</td>
+              </tr>`;
+            }).join('')}
+            </tbody>
+          </table>`;
+        };
+
+        // Aggregated table — always shown
+        if (exp.results_summary && exp.results_summary.length) {
+          const combinedLabel = expSeeds.length > 1
+            ? `Medii combinate · ${expSeeds.length} seeduri · ${totalRows} rânduri total`
+            : `Medie · ${totalRows} rânduri total`;
+          html += `<div style="font-size:.72rem;color:var(--text2);margin-bottom:3px;margin-top:${expSeeds.length > 1 ? '10px;border-top:1px solid var(--border);padding-top:6px' : '4px'};">
+            ${combinedLabel}
+          </div>`;
+          html += renderSummaryTable(exp.results_summary);
+        }
+
+        html += `</div>`;
+
+        // Per-seed tabs — summary table first, then raw per-instance data
+        expSeeds.forEach(seedName => {
+          const seedRows = exp.results.filter(x => x.run_seed === seedName);
+          const instances = [...new Set(seedRows.map(x => x.instance_id))].sort();
+          const seedSummaryData = (exp.results_summary_per_seed || []).find(s => s.seed === seedName);
+          html += `<div id="${tbId}_${seedName}" style="display:none">`;
+          if (seedSummaryData && seedSummaryData.rows && seedSummaryData.rows.length) {
+            html += `<div style="font-size:.72rem;color:var(--text2);margin-bottom:3px;">
+              Medie · ${instances.length} instanțe de test
+            </div>`;
+            html += renderSummaryTable(seedSummaryData.rows);
+            html += `<div style="font-size:.72rem;color:var(--text2);margin-bottom:3px;margin-top:10px;border-top:1px solid var(--border);padding-top:6px;">
+              Detalii per instanță · ${seedRows.length} rânduri
+            </div>`;
+          } else {
+            html += `<div style="font-size:.72rem;color:var(--text2);margin-bottom:3px;">
+              ${seedRows.length} rânduri · ${instances.length} instante de test
+            </div>`;
+          }
+          if (instances.length > 1) {
+            instances.forEach(instId => {
+              const instRows = seedRows.filter(x => x.instance_id === instId);
+              html += `<details open style="margin-bottom:4px;">
+                <summary style="cursor:pointer;font-size:.78rem;color:var(--text2);">
+                  <code>${escHtml(instId)}</code> (${instRows.length} strategii)
+                </summary>
+                ${renderCSVTable(instRows)}
+              </details>`;
+            });
+          } else {
+            html += renderCSVTable(seedRows);
+          }
+          html += `</div>`;
+        });
+
+        html += `</div>`;
+      }
+
+      // Experiment configuration panel
+      if (exp.experiment_config) {
+        const cfg = exp.experiment_config;
+        const gp  = cfg.gp || {};
+        const cl  = cfg.cluster || {};
+        const fw  = cfg.fitness || {};
+        const wl  = cfg.workload || {};
+        const het = cl.heterogeneity || {};
+        const termCount = (gp.terminal_mandatory || []).length || 31;
+        const effectiveNodes = het.enabled
+          ? `${(cl.node_templates||[]).reduce((s,t)=>s+t.count,0)} noduri · ${het.tiers} tier-uri (${(het.cpu_range||[]).join('–')} core)`
+          : (cl.node_templates||[]).map(t=>`${t.count}×${t.cpu_capacity}cpu`).join(', ');
         html += `<details style="margin-top:6px;">
-          <summary style="cursor:pointer;font-size:.82rem;color:var(--primary)">Tabel rezultate (${exp.results.length} rânduri)</summary>
-          ${renderCSVTable(exp.results)}
+          <summary style="cursor:pointer;font-size:.8rem;color:var(--primary)">Configuratie experiment</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px 0;font-size:.77rem;">
+            <div>
+              <div style="font-weight:600;margin-bottom:4px;color:var(--text2)">GP</div>
+              <table style="border-collapse:collapse;width:100%">
+                <tr><td style="padding:2px 6px;color:var(--text2)">pop / gen</td><td>${gp.population_size ?? '?'} / ${gp.n_generations ?? '?'}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">parsimony</td><td>${gp.parsimony_coefficient ?? '?'}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">tournament</td><td>${gp.tournament_size ?? '?'}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">max_depth</td><td>${gp.max_tree_depth ?? '?'}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">validation_hof</td><td>${gp.validation_hof_size ?? 0}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">terminale</td><td>${termCount}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">dynamic inst.</td><td>${cfg.dynamic_instances ? 'da' : 'nu'}</td></tr>
+              </table>
+            </div>
+            <div>
+              <div style="font-weight:600;margin-bottom:4px;color:var(--text2)">Cluster</div>
+              <table style="border-collapse:collapse;width:100%">
+                <tr><td style="padding:2px 6px;color:var(--text2)">noduri</td><td>${effectiveNodes}</td></tr>
+                ${het.enabled ? `
+                <tr><td style="padding:2px 6px;color:var(--text2)">mem range</td><td>${(het.mem_range||[]).map(v=>Math.round(v/1024)+'GB').join('–')}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">cost range</td><td>€${(het.cost_range||[]).join('–')}/h</td></tr>` : ''}
+              </table>
+              <div style="font-weight:600;margin:8px 0 4px;color:var(--text2)">Workload</div>
+              <table style="border-collapse:collapse;width:100%">
+                <tr><td style="padding:2px 6px;color:var(--text2)">pods</td><td>${wl.total_pods ?? '?'}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">profil</td><td>${wl.profile || 'generic'}</td></tr>
+                <tr><td style="padding:2px 6px;color:var(--text2)">n_train/val/test</td><td>${cfg.num_training_instances}/${cfg.num_validation_instances}/${cfg.num_test_instances}</td></tr>
+              </table>
+            </div>
+            <div style="grid-column:span 2">
+              <div style="font-weight:600;margin-bottom:4px;color:var(--text2)">Fitness weights</div>
+              <div style="display:flex;gap:16px;">
+                <span>α wait=${fw.alpha_wait_time}</span>
+                <span>β waste=${fw.beta_resource_waste}</span>
+                <span>γ reject=${fw.gamma_failed_pods}</span>
+                ${fw.delta_evicted_pods ? `<span>δ evict=${fw.delta_evicted_pods}</span>` : ''}
+              </div>
+            </div>
+          </div>
         </details>`;
       }
 
-      html += `</div>`;
+      html += `</div></details></div>`;
+    }
+    html += `</div>`;
+  }
+
+  // ── Multi-seed results ─────────────────────────────────────────────
+  if (e.is_multiseed) {
+    const seedCount = (e.seeds || []).length;
+    html += `<div class="card" style="border-left:3px solid var(--primary)">
+      <h3>Evaluare Multi-Seed
+        <span class="badge badge-info" style="margin-left:8px">${seedCount} seeds</span>
+        ${e.multiseed_csv ? `<button class="btn btn-sm" style="margin-left:8px"
+          onclick="downloadCSV(expsData[${idx}].multiseed_csv, '${e.name}_multiseed.csv')">⬇ Export Multi-Seed CSV</button>` : ''}
+      </h3>`;
+
+    // Seeds list
+    if (e.seeds && e.seeds.length) {
+      html += `<div style="font-size:.82rem;color:var(--text2);margin-bottom:10px;">
+        Seeds: ${e.seeds.map(s => `<code>${s.replace('seed_','')}</code>`).join(' · ')}
+      </div>`;
+    }
+
+    // Multi-seed summary text
+    if (e.multiseed_summary) {
+      html += `<details open>
+        <summary style="cursor:pointer;font-weight:600;color:var(--primary);margin-bottom:6px;">
+          Sumar mediană ± IQR per strategie
+        </summary>
+        <div class="code-block" style="font-size:.75rem;max-height:400px;overflow:auto;white-space:pre;">${escHtml(e.multiseed_summary)}</div>
+      </details>`;
+    }
+
+    // δ (Cliff's delta) summary table — parsed from acceptance_criteria.txt
+    if (e.acceptance_criteria) {
+      const deltaColor = d => {
+        if (d >= 0.474) return '#22c55e';
+        if (d >= 0.33)  return '#86efac';
+        if (d >= 0.147) return '#fbbf24';
+        if (d >= 0)     return 'var(--text2)';
+        return '#f87171';
+      };
+      const deltaMag = d => {
+        if (d >= 0.474) return 'large';
+        if (d >= 0.33)  return 'medium';
+        if (d >= 0.147) return 'small';
+        if (d >= 0)     return 'negligible';
+        return 'negativ';
+      };
+      // Parse each experiment block from acceptance_criteria.txt
+      const expRows = [];
+      for (const block of e.acceptance_criteria.split('--- Experiment:').slice(1)) {
+        const nameM   = block.match(/^\s*([\w_]+)/);
+        const verdictM = block.match(/VERDICT:\s+(\w+)\s+\((\d)\/4/);
+        const deltaM  = block.match(/Cliff.*?delta=([-\d.]+)/);
+        const baseM   = block.match(/vs best baseline \(([\w]+)\)/);
+        if (!nameM || !verdictM || !deltaM) continue;
+        expRows.push({
+          exp: nameM[1],
+          verdict: verdictM[1],
+          n: verdictM[2],
+          d: parseFloat(deltaM[1]),
+          baseline: baseM ? baseM[1] : '',
+        });
+      }
+      expRows.sort((a, b) => b.d - a.d);
+      if (expRows.length) {
+        html += `<div style="margin-top:10px;">
+          <div style="font-weight:600;font-size:.85rem;margin-bottom:5px;">
+            Cliff's δ vs cel mai bun baseline
+            <span class="tip" data-tip="Cliff's delta masoara cat de des GP castiga fata de cel mai bun baseline in comparatii pereche. >=0.474=large >=0.33=medium >=0.147=small <0=GP pierde.">?</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:.78rem;">
+            <thead><tr style="background:var(--surface2)">
+              <th style="padding:3px 8px;text-align:left;border:1px solid var(--border)">Experiment</th>
+              <th style="padding:3px 8px;text-align:left;border:1px solid var(--border)">Verdict</th>
+              <th style="padding:3px 8px;text-align:right;border:1px solid var(--border)">δ</th>
+              <th style="padding:3px 8px;text-align:left;border:1px solid var(--border)">Magnitudine</th>
+              <th style="padding:3px 8px;text-align:left;border:1px solid var(--border)">vs</th>
+            </tr></thead>
+            <tbody>
+            ${expRows.map(r => {
+              const n4 = r.n === '4';
+              const ok = r.verdict === 'ACCEPTED';
+              const vs = n4 ? 'color:#22c55e;font-weight:600' : ok ? 'color:#fbbf24' : 'color:#f87171;font-weight:600';
+              return `<tr>
+                <td style="padding:3px 8px;border:1px solid var(--border);font-family:monospace">${escHtml(r.exp)}</td>
+                <td style="padding:3px 8px;border:1px solid var(--border);${vs}">${r.verdict} ${r.n}/4</td>
+                <td style="padding:3px 8px;text-align:right;border:1px solid var(--border);font-weight:600;color:${deltaColor(r.d)}">${r.d >= 0 ? '+' : ''}${r.d.toFixed(3)}</td>
+                <td style="padding:3px 8px;border:1px solid var(--border);color:${deltaColor(r.d)}">${deltaMag(r.d)}</td>
+                <td style="padding:3px 8px;border:1px solid var(--border);color:var(--text2);font-size:.72rem">${escHtml(r.baseline)}</td>
+              </tr>`;
+            }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+      }
+    }
+
+    // Acceptance criteria report (raw text, collapsible)
+    if (e.acceptance_criteria) {
+      html += `<details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-weight:600;color:var(--primary);margin-bottom:6px;">
+          Criterii de Acceptanta — detalii complete
+        </summary>
+        <div style="font-size:.75rem;max-height:500px;overflow:auto;white-space:pre;font-family:monospace;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;line-height:1.6;color:var(--text)">${escHtml(e.acceptance_criteria)}</div>
+      </details>`;
+    }
+
+    // ── Terminal color legend ────────────────────────────────────
+    html += `<div style="font-size:.75rem;color:var(--text2);margin:8px 0 4px;display:flex;gap:12px;flex-wrap:wrap;">
+      <span>Legende terminale:</span>
+      <span style="color:#4CAF50">&#9632; Pod</span>
+      <span style="color:#2196F3">&#9632; Node</span>
+      <span style="color:#FF9800">&#9632; Cluster</span>
+      <span style="color:#9C27B0">&#9632; Compound</span>
+      <span style="color:#607D8B">&#9632; Functii</span>
+    </div>`;
+
+    // ── Verdict summary plot ────────────────────────────────────
+    if (e.analysis && e.analysis.verdicts_plot) {
+      const vp = e.analysis.verdicts_plot;
+      const vcid = 'vdict_' + e.name.replace(/[^a-zA-Z0-9]/g, '_');
+      html += `<div style="margin-top:12px;">
+        <strong style="font-size:.85rem;">Verdict Acceptare per Experiment</strong>
+        <div class="chart-card" id="${vcid}" style="margin-top:6px;max-width:700px;">
+          <div class="chart-actions"><button class="btn btn-sm" onclick="downloadImageFromCard('${vcid}')">⬇</button></div>
+          <img data-src="${vp}" class="lazy-img" style="width:100%" onclick="openModal(this.src,'Verdicts')">
+        </div>
+      </div>`;
+    }
+
+    // ── Terminal frequency chart ────────────────────────────────
+    if (e.analysis && e.analysis.terminal_frequency_plot) {
+      const tp = e.analysis.terminal_frequency_plot;
+      const tcid = 'termfreq_' + e.name.replace(/[^a-zA-Z0-9]/g, '_');
+      html += `<details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-weight:600;color:var(--primary)">
+          Frecventa Terminalelor GP (feature importance)
+        </summary>
+        <div class="chart-card" id="${tcid}" style="margin-top:6px;max-width:700px;">
+          <div class="chart-actions"><button class="btn btn-sm" onclick="downloadImageFromCard('${tcid}')">⬇</button></div>
+          <img data-src="${tp}" class="lazy-img" style="width:100%" onclick="openModal(this.src,'Terminal Frequency')">
+        </div>
+      </details>`;
+    }
+
+    // ── Convergence plots per experiment ────────────────────────
+    if (e.analysis && e.analysis.convergence_plots && e.analysis.convergence_plots.length) {
+      html += `<details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-weight:600;color:var(--primary)">
+          Convergenta GP per Experiment (${e.analysis.convergence_plots.length} grafice)
+        </summary>
+        <div class="chart-grid" style="margin-top:8px;">`;
+      for (const p of e.analysis.convergence_plots) {
+        const fname = getFileName(p);
+        const expName = fname.replace('convergence_','').replace('.png','');
+        const cid = 'conv_' + fname.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `<div class="chart-card" id="${cid}">
+          <div class="chart-title">${escHtml(expName)}</div>
+          <div class="chart-actions"><button class="btn btn-sm" onclick="downloadImageFromCard('${cid}')">⬇</button></div>
+          <img data-src="${p}" class="lazy-img" alt="${fname}" onclick="openModal(this.src,'${expName}')">
+        </div>`;
+      }
+      html += `</div></details>`;
+    }
+
+    // ── Box plots cross-seed ─────────────────────────────────────
+    if (e.analysis && e.analysis.box_plots && e.analysis.box_plots.length) {
+      html += `<details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-weight:600;color:var(--primary)">
+          Box Plots Calitate Cross-Seed (${e.analysis.box_plots.length} grafice)
+        </summary>
+        <div class="chart-grid" style="margin-top:8px;">`;
+      for (const p of e.analysis.box_plots) {
+        const fname = getFileName(p);
+        const cid = 'bp_' + fname.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `<div class="chart-card" id="${cid}">
+          <div class="chart-title">${escHtml(fname.replace(/box_multiseed_|_quality_score\.png/g,'').replace(/_/g,' '))}</div>
+          <div class="chart-actions"><button class="btn btn-sm" onclick="downloadImageFromCard('${cid}')">⬇</button></div>
+          <img data-src="${p}" class="lazy-img" alt="${fname}" onclick="openModal(this.src,'${fname}')">
+        </div>`;
+      }
+      html += `</div></details>`;
     }
     html += `</div>`;
   }
@@ -796,7 +1326,7 @@ async function showExperiment(idx) {
       <h3>Grafice Analiză</h3>
       <div class="chart-grid">`;
     for (const p of e.analysis.plots) {
-      const fname = p.split('/').pop();
+      const fname = getFileName(p);
       const cardId = 'aplot-' + fname.replace(/[^a-zA-Z0-9]/g, '_');
       html += `<div class="chart-card" id="${cardId}">
         <div class="chart-title">${escHtml(fname.replace(/_/g, ' ').replace('.png',''))}</div>
@@ -827,7 +1357,12 @@ async function showExperiment(idx) {
     }
   }
 
-  document.getElementById('expDetailContainer').innerHTML = `<div id="expDetail">${html}</div>`;
+  // Destroy previous charts first so detached canvases don't keep resize observers alive.
+  for (const chartId of Object.keys(chartInstances)) {
+    destroyChart(chartId);
+  }
+
+  document.getElementById('expDetailContainer').innerHTML = `<div class="card" id="expDetail">${html}</div>`;
 
   // Load lazy images
   loadLazyImages();
@@ -924,7 +1459,7 @@ function buildConvergenceChart(canvasId, data) {
       datasets: [
         {
           label: 'Best',
-          data: data.map(d => d.min),
+          data: data.map(d => d.max),
           borderColor: '#22c55e',
           backgroundColor: 'rgba(34,197,94,.1)',
           fill: true,
@@ -946,12 +1481,13 @@ function buildConvergenceChart(canvasId, data) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       plugins: {
         legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 }, color: textColor } },
       },
       scales: {
         x: { title: { display: true, text: 'Gen', font: { size: 10 }, color: textColor }, ticks: { color: textColor, font: { size: 9 } }, grid: { display: false } },
-        y: { title: { display: true, text: 'Fitness', font: { size: 10 }, color: textColor }, ticks: { color: textColor, font: { size: 9 } }, grid: { color: gridColor } },
+        y: { title: { display: true, text: 'Quality (higher is better)', font: { size: 10 }, color: textColor }, ticks: { color: textColor, font: { size: 9 } }, grid: { color: gridColor } },
       },
     },
   });
@@ -964,7 +1500,16 @@ function aggregateByStrategy(csv) {
   const groups = {};
   csv.forEach(row => {
     const s = row.strategy;
-    if (!groups[s]) groups[s] = { scheduling_success_rate: [], avg_wait_time: [], avg_cpu_utilization: [], avg_mem_utilization: [] };
+    if (!groups[s]) {
+      groups[s] = {
+        quality_score: [],
+        scheduling_success_rate: [],
+        avg_wait_time: [],
+        avg_cpu_utilization: [],
+        avg_mem_utilization: [],
+      };
+    }
+    groups[s].quality_score.push(parseFloat(row.quality_score) || 0);
     groups[s].scheduling_success_rate.push(parseFloat(row.scheduling_success_rate) || 0);
     groups[s].avg_wait_time.push(parseFloat(row.avg_wait_time) || 0);
     groups[s].avg_cpu_utilization.push(parseFloat(row.avg_cpu_utilization) || 0);
@@ -980,32 +1525,88 @@ function aggregateByStrategy(csv) {
   return result;
 }
 
+// ── Sortable table state ─────────────────────────────────────────────
+let _tblCounter = 0;
+const _tblData  = {};   // tableId → { rows, cols }
+const _tblSort  = {};   // tableId → { col, dir }
+
+const _labelMap = {
+  strategy: 'Strategie', experiment: 'Experiment', instance_id: 'Instanță',
+  seed: 'Seed', run_seed: 'Seed', quality_score: 'Quality',
+  total_pods: 'Total Pods', scheduled_pods: 'Scheduled',
+  completed_pods: 'Completed', rejected_pods: 'Rejected',
+  scheduling_success_rate: 'Success %', avg_wait_time: 'Avg Wait',
+  wait_time_p90: 'Wait P90', wait_time_p95: 'Wait P95', wait_time_p99: 'Wait P99',
+  avg_cpu_utilization: 'CPU Util', avg_mem_utilization: 'MEM Util',
+  throughput: 'Throughput', evicted_pods: 'Evicted',
+  preemption_count: 'Preemptions', node_failure_count: 'Node Failures',
+  avg_scheduling_attempts: 'Avg Attempts',
+};
+
+const _importantCols = [
+  'strategy','experiment','run_seed','instance_id','seed','quality_score',
+  'total_pods','scheduled_pods','completed_pods','rejected_pods',
+  'scheduling_success_rate','avg_wait_time','wait_time_p90','wait_time_p95',
+  'wait_time_p99','avg_cpu_utilization','avg_mem_utilization','throughput',
+  'evicted_pods','preemption_count','node_failure_count','avg_scheduling_attempts',
+];
+
+function _fmtCell(val) {
+  if (val == null || val === '') return '';
+  if (/^-?\d+\.?\d*$/.test(String(val))) {
+    const n = parseFloat(val);
+    return Number.isInteger(n) ? n.toString() : n.toFixed(4);
+  }
+  return String(val);
+}
+
+function _renderRows(tableId, rows) {
+  const { cols } = _tblData[tableId];
+  return rows.map(row =>
+    `<tr>${cols.map(c => `<td>${escHtml(_fmtCell(row[c]))}</td>`).join('')}</tr>`
+  ).join('');
+}
+
+function sortTable(tableId, col) {
+  const prev = _tblSort[tableId] || { col: null, dir: 'asc' };
+  const dir  = (prev.col === col && prev.dir === 'asc') ? 'desc' : 'asc';
+  _tblSort[tableId] = { col, dir };
+
+  const rows = [..._tblData[tableId].rows].sort((a, b) => {
+    const va = a[col] ?? '', vb = b[col] ?? '';
+    const na = parseFloat(va), nb = parseFloat(vb);
+    if (!isNaN(na) && !isNaN(nb)) return dir === 'asc' ? na - nb : nb - na;
+    return dir === 'asc'
+      ? String(va).localeCompare(String(vb))
+      : String(vb).localeCompare(String(va));
+  });
+
+  document.getElementById(tableId + '_body').innerHTML = _renderRows(tableId, rows);
+
+  // Update header arrows
+  document.querySelectorAll(`#${tableId} th.sortable`).forEach(th => {
+    const icon = th.querySelector('.sort-arrow');
+    if (icon) icon.textContent = th.dataset.col === col ? (dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+  });
+}
+
 function renderCSVTable(csv) {
   if (!csv || !csv.length) return '<p style="color:var(--text2)">Fără date.</p>';
   const cols = Object.keys(csv[0]);
-  // Limit columns for readability
-  const importantCols = ['strategy','experiment','instance_id','total_pods','scheduled_pods','rejected_pods',
-    'scheduling_success_rate','avg_wait_time','avg_cpu_utilization','avg_mem_utilization','throughput'];
-  const displayCols = cols.filter(c => importantCols.includes(c));
-  const extraCols = cols.filter(c => !importantCols.includes(c));
-  const shownCols = displayCols.length ? displayCols : cols.slice(0, 12);
+  const displayCols = cols.filter(c => _importantCols.includes(c));
+  const shownCols   = displayCols.length ? displayCols : cols.slice(0, 12);
 
-  let html = `<div class="data-table-wrap"><table class="data-table"><thead><tr>`;
-  shownCols.forEach(c => { html += `<th>${escHtml(c)}</th>`; });
-  html += `</tr></thead><tbody>`;
-  csv.forEach(row => {
-    html += `<tr>`;
-    shownCols.forEach(c => {
-      let val = row[c] || '';
-      // Format numbers
-      if (/^-?\d+\.?\d*$/.test(val)) {
-        const n = parseFloat(val);
-        val = Number.isInteger(n) ? n.toString() : n.toFixed(4);
-      }
-      html += `<td>${escHtml(val)}</td>`;
-    });
-    html += `</tr>`;
+  const tableId = 'tbl_' + (++_tblCounter);
+  _tblData[tableId] = { rows: csv, cols: shownCols };
+
+  let html = `<div class="data-table-wrap"><table class="data-table" id="${tableId}"><thead><tr>`;
+  shownCols.forEach(c => {
+    html += `<th class="sortable" data-col="${c}" onclick="sortTable('${tableId}','${c}')" title="${escHtml(c)}" style="cursor:pointer;white-space:nowrap;user-select:none;">
+      ${escHtml(_labelMap[c] || c)}<span class="sort-arrow"> ⇅</span>
+    </th>`;
   });
+  html += `</tr></thead><tbody id="${tableId}_body">`;
+  html += _renderRows(tableId, csv);
   html += `</tbody></table></div>`;
   return html;
 }
@@ -1124,9 +1725,210 @@ function downloadText(text, filename) {
   URL.revokeObjectURL(url);
 }
 
+function getFileName(path) {
+  if (!path) return '';
+  const normalized = path.replace(/\\/g, '/');
+  return normalized.split('/').pop() || '';
+}
+
+/* ── GP Rule colorizer ──────────────────────────────────────────────
+   Colors terminal names by category (pod/node/cluster/compound)
+   and function names in a distinct color. */
+function colorizeRule(expr) {
+  if (!expr) return '';
+  const POD_TERMS = new Set([
+    'POD_CPU_REQ','POD_MEM_REQ','POD_GPU_REQ','POD_PRIORITY',
+    'POD_QOS','POD_WAIT_TIME','POD_DURATION',
+  ]);
+  const NODE_TERMS = new Set([
+    'NODE_CPU_AVAIL','NODE_MEM_AVAIL','NODE_GPU_AVAIL','NODE_CPU_UTIL',
+    'NODE_MEM_UTIL','NODE_POD_COUNT','NODE_COST','NODE_TAINT_COUNT',
+    'NODE_CPU_MEM_IMBALANCE','NODE_CPU_FREE_AFTER','NODE_MEM_FREE_AFTER',
+    'NODE_PREEMPTABLE_COUNT','NODE_OVERCOMMIT_RATIO','NODE_AFFINITY_CONFLICT',
+  ]);
+  const CLUSTER_TERMS = new Set([
+    'PENDING_COUNT','CLUSTER_CPU_UTIL','CLUSTER_MEM_UTIL','CLUSTER_GPU_UTIL',
+    'PENDING_PRESSURE','CLUSTER_UTIL_STD','CLUSTER_HEALTHY_RATIO',
+  ]);
+  const COMPOUND_TERMS = new Set([
+    'RESOURCE_FIT','REPLICA_GROUP_COLOCATED','NAMESPACE_PENDING_RATIO',
+  ]);
+  const FUNCS = new Set([
+    'add','sub','mul','protected_div','neg','min','max','if_positive',
+  ]);
+
+  // Replace tokens with colored spans
+  return escHtml(expr).replace(/([A-Z_]+|[a-z_]+)/g, (token) => {
+    const raw = token.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+    if (POD_TERMS.has(raw))     return `<span style="color:#4CAF50;font-weight:600">${token}</span>`;
+    if (NODE_TERMS.has(raw))    return `<span style="color:#2196F3;font-weight:600">${token}</span>`;
+    if (CLUSTER_TERMS.has(raw)) return `<span style="color:#FF9800;font-weight:600">${token}</span>`;
+    if (COMPOUND_TERMS.has(raw))return `<span style="color:#9C27B0;font-weight:600">${token}</span>`;
+    if (FUNCS.has(raw))         return `<span style="color:#607D8B">${token}</span>`;
+    return token;
+  });
+}
+
+function toSafeId(value) {
+  return (value || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+function strategyFromImagePath(path) {
+  const fname = getFileName(path);
+  const base = fname.replace(/\.png$/i, '');
+
+  if (!base) return 'General';
+  if (base === 'strategy_comparison' || base.startsWith('gp_tree')) return 'General';
+
+  const firstChunk = base.split('_')[0];
+  if (firstChunk === 'GP') {
+    const engine = base.split('_')[1];
+    if (engine) return `GP(${engine})`;
+  }
+
+  return firstChunk || 'General';
+}
+
+function groupRunImagesByStrategy(images) {
+  const groups = {};
+  for (const path of images || []) {
+    const key = strategyFromImagePath(path);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(path);
+  }
+
+  const preferred = ['GP(deap)', 'Random', 'RoundRobin', 'FirstFit', 'LeastAllocated', 'MostAllocated', 'BalancedAllocation', 'BinPacking', 'General'];
+  const ordered = {};
+
+  for (const key of preferred) {
+    if (groups[key]) ordered[key] = groups[key];
+  }
+  for (const key of Object.keys(groups).sort()) {
+    if (!(key in ordered)) ordered[key] = groups[key];
+  }
+  return ordered;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    UTILITIES
    ═══════════════════════════════════════════════════════════════════════ */
+function toggleAbout(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function buildAboutPanel(e) {
+  const cfg = (e.experiments && e.experiments[0] && e.experiments[0].experiment_config) || {};
+  const gp  = cfg.gp  || {};
+  const cl  = cfg.cluster || {};
+  const fw  = cfg.fitness || {};
+  const wl  = cfg.workload || {};
+  const het = cl.heterogeneity || {};
+
+  const presetDescr = {
+    quick:     'Parametri minimali pentru validare rapidă a codului (~0.3s/exp)',
+    medium:    'Parametri echilibrați pentru iterație rapidă (~45s/exp, ~1.5h pentru 5 seeds)',
+    day:       'Medium scale + overnight extras: tournament=5, validation_hof, mean_minus_std (~75s/exp, ~3h pentru 5 seeds)',
+    overnight: 'Explorare profundă pentru rulare de noapte: pop=120, gen=50 (~312s/exp, ~10.7h pentru 5 seeds)',
+    full:      'Preset complet, fără flag special (~96s/exp, ~3.4h pentru 5 seeds)',
+    unknown:   'Preset necunoscut (rulare veche)',
+  };
+  const preset = e.preset || 'unknown';
+  const seeds  = (e.seeds || []).map(s => s.replace('seed_','')).join(', ');
+  const termCount = (gp.terminal_mandatory || []).length || 31;
+  const termLabel = termCount === 14 ? '14 core terminale K8s' : `${termCount} terminale`;
+
+  const row = (label, value, tip) =>
+    `<tr><td style="padding:3px 8px;color:var(--text2);white-space:nowrap">
+       ${label}${tip ? `<span class="tip" data-tip="${tip.replace(/"/g,"'")}" style="margin-left:4px">?</span>` : ''}
+     </td>
+     <td style="padding:3px 8px">${value}</td></tr>`;
+
+  const section = (title, rows) =>
+    `<div><div style="font-weight:600;color:var(--text2);margin:8px 0 3px;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em">${title}</div>
+     <table style="border-collapse:collapse;width:100%;font-size:.8rem">${rows}</table></div>`;
+
+  return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px 14px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px 24px;">
+      ${section('Rulare', [
+        row('Preset', `<code>--${preset}</code> — ${presetDescr[preset] || ''}`),
+        row('Seeds', seeds || '—'),
+        row('Experimente', e.experiments ? e.experiments.length : '—'),
+      ].join(''))}
+      ${section('Genetic Programming', [
+        row('Populatie', `${gp.population_size || '?'} indivizi`, 'Numărul de arbori GP evaluați în paralel la fiecare generație'),
+        row('Generatii', `${gp.n_generations || '?'}`, 'Numărul de cicluri de selecție + crossover + mutație'),
+        row('Parsimony', `${gp.parsimony_coefficient || '?'}`, 'Penalizare logaritmică aplicată arborilor mari pentru a preveni bloat-ul'),
+        row('Tournament', `${gp.tournament_size || '?'}`, 'Câți indivizi concurează la fiecare selecție — mai mare = presiune mai mare'),
+        row('Adancime max', `${gp.max_tree_depth || '?'}`, 'Adâncimea maximă permisă a arborilor GP (init: min(max,5))'),
+        row('Terminale', termLabel, 'Feature-urile K8s disponibile GP-ului ca variabile de intrare'),
+        row('Seeding', gp.validation_hof_size > 0 ? `da (hof=${gp.validation_hof_size})` : 'nu', 'Injectare de expresii baseline în populația inițială + selecție champion pe validation set'),
+        row('Dynamic inst.', cfg.dynamic_instances ? 'da' : 'nu', 'Workload nou generat la fiecare generație — previne overfitting pe instanțe fixe'),
+      ].join(''))}
+      ${section('Cluster', [
+        row('Noduri', (cl.node_templates||[]).reduce((s,t)=>s+t.count,0) || '?', 'Total noduri din cluster'),
+        het.enabled
+          ? row('Heterogenitate', `${het.tiers} tier-uri`, 'Noduri cu capacități diferite: small/medium/large')
+          : row('Tip noduri', 'omogene', 'Toate nodurile au aceeași capacitate'),
+        het.enabled ? row('CPU range',  `${(het.cpu_range||[]).join(' – ')} core`) : '',
+        het.enabled ? row('Mem range',  `${(het.mem_range||[]).map(v=>Math.round(v/1024)+'GB').join(' – ')}`) : '',
+        het.enabled ? row('Cost range', `€${(het.cost_range||[]).join(' – ')}/oră`) : '',
+        row('Pods (total)', `${wl.total_pods || '?'}`, 'Numărul de pod-uri generate per instanță de simulare'),
+        row('Profil', wl.profile || 'generic', 'Profilul workload-ului: distribuție CPU/MEM/prioritate'),
+        row('n_train / val / test', `${cfg.num_training_instances || '?'} / ${cfg.num_validation_instances || 0} / ${cfg.num_test_instances || '?'}`,
+          'Instanțe pentru antrenament GP / selecție champion pe validation / evaluare finală independentă'),
+      ].join(''))}
+      ${section('Fitness (quality score)', [
+        row('α wait_time', fw.alpha_wait_time ?? '?', 'Penalizare timp de așteptare al pod-urilor înainte de schedulare'),
+        row('β resource_waste', fw.beta_resource_waste ?? '?', 'Penalizare resurse irosite (1 - avg utilization)'),
+        row('γ failed_pods', fw.gamma_failed_pods ?? '?', 'Penalizare pod-uri respinse / neschedulizate'),
+        fw.delta_evicted_pods ? row('δ evicted_pods', fw.delta_evicted_pods, 'Penalizare pod-uri evacuate din cauza node failures') : '',
+        fw.theta_gpu_waste ? row('θ gpu_waste', fw.theta_gpu_waste, 'Penalizare GPU idle: 1 − avg_gpu_utilization. Activ doar pentru g_aitrai.') : '',
+        fw.iota_cost ? row('ι cost', fw.iota_cost, 'Penalizare cost per pod: cost/(cost+0.005). Activ pentru cluster heterogen.') : '',
+        row('Formula', 'quality = 1 − (α·W + β·R + γ·F + θ·G + ι·K)', 'Scorul final e în [0,1]; mai mare = mai bun'),
+      ].join(''))}
+      ${section('Timing GP', (() => {
+        const exps = e.experiments || [];
+        const rows = exps.map(exp => {
+          const seeds = exp.all_rules || (exp.gp_rule ? [exp.gp_rule] : []);
+          const total = seeds.reduce((s, r) => s + (r.training_time_s || 0), 0);
+          const perSeed = seeds.length > 0 ? total / seeds.length : 0;
+          if (!perSeed) return '';
+          const bar = Math.round(perSeed / 30);
+          const barHtml = `<span style="display:inline-block;width:${Math.min(bar,60)}px;height:6px;background:var(--primary);opacity:.5;border-radius:2px;vertical-align:middle;margin-right:4px"></span>`;
+          const totalFmt = total > 3600 ? `${(total/3600).toFixed(2)}h` : `${Math.round(total)}s`;
+          return row(exp.name, `${barHtml}${Math.round(perSeed)}s/seed · ${totalFmt} total (${seeds.length} seeds)`);
+        }).filter(Boolean);
+        const grandTotal = exps.reduce((s, exp) => {
+          const seeds = exp.all_rules || (exp.gp_rule ? [exp.gp_rule] : []);
+          return s + seeds.reduce((ss, r) => ss + (r.training_time_s || 0), 0);
+        }, 0);
+        if (grandTotal > 0) {
+          const gtFmt = grandTotal > 3600 ? `${(grandTotal/3600).toFixed(1)}h` : `${Math.round(grandTotal/60)}min`;
+          rows.push(row('<strong>TOTAL</strong>', `<strong>${gtFmt}</strong> antrenament GP pur (fără evaluare baselines)`));
+        }
+        return rows.join('');
+      })())}
+    </div>
+  </div>`;
+}
+
+function selectSeedTab(baseId, tabId) {
+  // Hide all tab content panels for this experiment
+  document.querySelectorAll(`[id^="${baseId}_"]`).forEach(el => {
+    if (!el.id.includes('_pill_')) el.style.display = 'none';
+  });
+  // Show selected panel
+  const panel = document.getElementById(`${baseId}_${tabId}`);
+  if (panel) panel.style.display = '';
+  // Update pill button styles
+  document.querySelectorAll(`[data-tbbase="${baseId}"]`).forEach(btn => {
+    const isActive = btn.dataset.tbid === tabId;
+    btn.style.background = isActive ? 'var(--primary)' : '';
+    btn.style.color = isActive ? '#fff' : '';
+  });
+}
+
 function escHtml(str) {
   if (!str) return '';
   const div = document.createElement('div');
@@ -1135,12 +1937,26 @@ function escHtml(str) {
 }
 
 function formatTimestamp(name) {
-  // Convert "2026_03_29_1950" -> "2026-03-29 19:50"
-  // or "2026_03_29_2011_results" -> "2026-03-29 20:11"
+  // Fallback only — server already returns run_ts formatted as "YYYY.MM.DD_HH:MM:SS"
   if (!name) return '';
-  const m = name.match(/^(\d{4})_(\d{2})_(\d{2})_(\d{2})(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}  ${m[4]}:${m[5]}`;
+  // New format dir: "2026_06_02_00_48_03" → display: "2026.06.02_00:48:03"
+  const mSec = name.match(/^(\d{4})_(\d{2})_(\d{2})_(\d{2})_(\d{2})_(\d{2})/);
+  if (mSec) return `${mSec[1]}.${mSec[2]}.${mSec[3]}_${mSec[4]}:${mSec[5]}:${mSec[6]}`;
+  // Old format dir: "2026_03_29_1950" → display: "2026.03.29_19:50"
+  const mMin = name.match(/^(\d{4})_(\d{2})_(\d{2})_(\d{2})(\d{2})/);
+  if (mMin) return `${mMin[1]}.${mMin[2]}.${mMin[3]}_${mMin[4]}:${mMin[5]}`;
   return name;
+}
+
+const PRESET_COLORS = { quick:'#94a3b8', medium:'#6366f1', overnight:'#8b5cf6', full:'#10b981' };
+const PRESET_LABELS = { quick:'quick', medium:'medium', overnight:'overnight', full:'full', unknown:'?' };
+
+function sweepTitle(e) {
+  const ts = e.run_ts || formatTimestamp(e.name);
+  const preset = e.preset || 'unknown';
+  const color = PRESET_COLORS[preset] || '#94a3b8';
+  const badge = `<span style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:.68rem;font-weight:600;background:${color};color:#fff;margin-left:6px;">${PRESET_LABELS[preset] || preset}</span>`;
+  return `${escHtml(ts)}${badge}`;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

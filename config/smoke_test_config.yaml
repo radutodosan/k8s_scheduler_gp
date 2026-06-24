@@ -1,7 +1,8 @@
-# Minimal config for quick smoke testing (< 30 seconds)
+﻿# Minimal config for quick smoke testing (< 30 seconds)
 name: "smoke_test"
 seed: 42
 num_training_instances: 2
+num_validation_instances: 0
 num_test_instances: 2
 dynamic_instances: false
 output_dir: "tmp/results"
@@ -55,11 +56,19 @@ gp:
   max_tree_depth: 6
   elitism_ratio: 0.1
   parsimony_coefficient: 0.001
+  n_workers: 1
+  fitness_aggregation: "mean"
+  fitness_std_penalty: 0.0
+  validation_hof_size: 0
 
 fitness:
   alpha_wait_time: 0.4
   beta_resource_waste: 0.3
   gamma_failed_pods: 0.3
+  delta_evicted_pods: 0.0
+  epsilon_preemptions: 0.0
+  eta_churn: 0.0
+  zeta_scheduling_attempts: 0.0
 
 dynamics:
   failure_mode: "off"

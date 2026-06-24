@@ -128,8 +128,8 @@ class TestGPRegression:
         # Not a strict guarantee, but extremely unlikely to be equal
         # with different seeds and enough generations
         # So we just check both produced valid results
-        assert fitness_a < float("inf")
-        assert fitness_b < float("inf")
+        assert fitness_a > 0.0
+        assert fitness_b > 0.0
 
     @staticmethod
     def _run_gp(seed: int) -> float:

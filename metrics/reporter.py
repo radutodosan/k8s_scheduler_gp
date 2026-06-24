@@ -22,12 +22,15 @@ class MetricsReporter:
         instance_id: str,
         seed: int,
         metrics: SchedulingMetrics,
+        quality_score: float | None = None,
     ) -> None:
         """Register the results of one simulation run."""
         row = metrics.to_dict()
         row["strategy"] = strategy_name
         row["instance_id"] = instance_id
         row["seed"] = seed
+        if quality_score is not None:
+            row["quality_score"] = round(float(quality_score), 6)
         self._records.append(row)
 
     def export_csv(self, path: str | Path) -> None:
@@ -41,6 +44,7 @@ class MetricsReporter:
             "strategy",
             "instance_id",
             "seed",
+            "quality_score",
             "total_pods",
             "scheduled_pods",
             "completed_pods",
@@ -56,6 +60,7 @@ class MetricsReporter:
             "throughput",
             "evicted_pods",
             "preemption_count",
+            "churn_rate",
             "node_failure_count",
             "avg_scheduling_attempts",
         ]

@@ -50,8 +50,8 @@ class TestBaseConfig:
         assert cfg.fitness.alpha_wait_time == 0.4
 
     def test_custom_gp_params(self):
-        cfg = _base_config(engine="gplearn", pop=200, gen=50, depth=10)
-        assert cfg.gp.engine == "gplearn"
+        cfg = _base_config(pop=200, gen=50, depth=10)
+        assert cfg.gp.engine == "deap"
         assert cfg.gp.population_size == 200
         assert cfg.gp.n_generations == 50
         assert cfg.gp.max_tree_depth == 10
@@ -106,13 +106,12 @@ class TestDefineExperiments:
     def test_groups(self):
         exps = define_experiments()
         groups = {e.group for e in exps}
-        assert groups == {"engine", "scale", "fitness_weights", "gp_params", "dynamics", "nsga2", "profile"}
+        assert groups == {"engine", "scale", "fitness_weights", "gp_params", "dynamics", "nsga2", "profile", "improvements"}
 
-    def test_engine_group_has_deap_and_gplearn(self):
+    def test_engine_group_uses_deap(self):
         exps = define_experiments()
         engine_exps = [e for e in exps if e.group == "engine"]
-        engines = {e.config.gp.engine for e in engine_exps}
-        assert engines == {"deap", "gplearn"}
+        assert all(e.config.gp.engine == "deap" for e in engine_exps)
 
     def test_scale_group_has_three_sizes(self):
         exps = define_experiments()
@@ -145,6 +144,8 @@ class TestDefineExperiments:
     def test_quick_mode_training_instances(self):
         quick = define_experiments(quick=True)
         for e in quick:
+            if e.group == "improvements":
+                continue  # improvements group uses fixed params independent of preset
             assert e.config.num_training_instances == 2
             assert e.config.num_test_instances == 2
 
@@ -386,7 +387,7 @@ class TestAnalysis:
 
         exp1_dir = input_dir / "e1"
         exp1_dir.mkdir()
-        log = [{"gen": 0, "min": 0.8, "avg": 1.0, "max": 1.2}]
+        log = [{"gen": 0, "max": 0.8, "avg": 0.6, "min": 0.3}]
         with open(exp1_dir / "convergence.json", "w") as f:
             json.dump(log, f)
         meta = {"name": "e1", "engine": "deap", "best_fitness": 0.5,

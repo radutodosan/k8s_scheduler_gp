@@ -104,7 +104,7 @@ class TestEndToEndPipeline:
         # 4. Train
         result = engine.train(fitness_function=evaluator, seed=cfg.seed)
         assert result.best_individual is not None
-        assert result.best_fitness < float("inf")
+        assert result.best_fitness > 0.0
 
         # 5. Evaluate on test set
         test_metrics = evaluator.evaluate_on_instances(result.best_individual, test)

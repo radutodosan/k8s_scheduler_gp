@@ -22,15 +22,23 @@ from scheduling.strategy import ISchedulingStrategy
 class BinPackingStrategy(ISchedulingStrategy):
     """Pack pods as tightly as possible onto existing nodes.
 
-    Score per feasible node:
-        score = (cpu_util_after + mem_util_after) / 2
+    **Fit-tightness score** per feasible node:
 
-    The node with the *highest* score (most loaded after placement)
-    is selected.  If GPU is requested, the score becomes:
-        score = (cpu_util_after + mem_util_after + gpu_util_after) / 3
+        fit_cpu = pod.cpu_request / node.cpu_available
+        fit_mem = pod.mem_request / node.mem_available
+        score   = (fit_cpu + fit_mem) / 2
 
-    This is the inverse of LeastAllocated — it prefers the fullest
-    node that still has room.
+    The node where the pod uses the *highest fraction of what is still
+    available* is selected.  This matches the Best Fit Decreasing (BFD)
+    semantics: place each item in the bin where it fits the tightest,
+    preserving large gaps on other nodes for future large items.
+
+    **Why this differs from MostAllocated:**
+    MostAllocated scores by current utilisation (allocated / capacity).
+    The ranking it produces is identical to utilisation_after for
+    equal-capacity nodes, but diverges on heterogeneous clusters.
+    Fit-tightness naturally routes CPU-hungry pods to CPU-heavy nodes
+    and memory-hungry pods to memory-heavy nodes, reducing fragmentation.
     """
 
     @property
@@ -46,24 +54,23 @@ class BinPackingStrategy(ISchedulingStrategy):
         best_score = -1.0
 
         for node in feasible:
-            cpu_after = (
-                (node.cpu_allocated + pod.cpu_request) / node.cpu_capacity
-                if node.cpu_capacity > 0
-                else 0.0
+            # Fraction of *available* CPU / MEM the pod would consume
+            fit_cpu = (
+                pod.cpu_request / node.cpu_available
+                if node.cpu_available > 0
+                else 1.0
             )
-            mem_after = (
-                (node.mem_allocated + pod.mem_request) / node.mem_capacity
-                if node.mem_capacity > 0
-                else 0.0
+            fit_mem = (
+                pod.mem_request / node.mem_available
+                if node.mem_available > 0
+                else 1.0
             )
 
-            if node.gpu_capacity > 0 and pod.gpu_request > 0:
-                gpu_after = (
-                    (node.gpu_allocated + pod.gpu_request) / node.gpu_capacity
-                )
-                score = (cpu_after + mem_after + gpu_after) / 3.0
+            if node.gpu_capacity > 0 and pod.gpu_request > 0 and node.gpu_available > 0:
+                fit_gpu = pod.gpu_request / node.gpu_available
+                score = (fit_cpu + fit_mem + fit_gpu) / 3.0
             else:
-                score = (cpu_after + mem_after) / 2.0
+                score = (fit_cpu + fit_mem) / 2.0
 
             if score > best_score:
                 best_score = score

@@ -1,7 +1,8 @@
 """Fitness evaluator — bridges the GP engine with the simulator.
 
 Runs one or more simulation instances with a candidate GP individual
-and returns a scalar fitness value (lower is better).
+and returns a scalar quality score in [0, 1] (higher is better,
+1.0 = perfect scheduling: zero wait, full utilisation, no rejections).
 """
 
 from __future__ import annotations
@@ -10,6 +11,8 @@ import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any, List, Optional, Tuple
+
+import numpy as np
 
 from config.schema import ClusterConfig, DynamicsConfig, FitnessWeights, WorkloadConfig
 from gp.interface import IGeneticEngine
@@ -20,6 +23,83 @@ from simulator.engine import SimulationEngine
 from workload.generator import IWorkloadGenerator
 
 logger = logging.getLogger(__name__)
+
+
+# ── Shared quality helper ──────────────────────────────────────────────
+
+def compute_quality_score(metrics: SchedulingMetrics, weights: FitnessWeights) -> float:
+    """Compute normalized scheduling quality in [0, 1] (higher is better).
+
+    quality = 1 - (alpha * W + beta * R + gamma * F + delta * E + epsilon * P + eta * C + zeta * A)
+        W      = wait_time / (wait_time + 1)
+        R      = 1 - mean(avg_cpu_utilization, avg_mem_utilization)
+        F      = rejected_pods / total_pods
+        E      = (evicted_pods / total_pods) normalized as x/(x+1)
+        P      = (preemption_count / total_pods) normalized as x/(x+1)
+        C      = churn_rate normalized as x/(x+1)
+        A      = avg_scheduling_attempts / (avg_scheduling_attempts + 1)
+    """
+    w = max(0.0, metrics.avg_wait_time)
+    w_norm = w / (w + 1.0)
+
+    util_cpu = max(0.0, min(1.0, metrics.avg_cpu_utilization))
+    util_mem = max(0.0, min(1.0, metrics.avg_mem_utilization))
+    util_mean = (util_cpu + util_mem) / 2.0
+    r = 1.0 - util_mean
+    r = max(0.0, min(1.0, r))
+
+    f = (metrics.rejected_pods / metrics.total_pods) if metrics.total_pods > 0 else 1.0
+    f = max(0.0, min(1.0, f))
+
+    # Eviction/preemption/churn can naturally exceed 1.0 in dynamic scenarios
+    # (same pod may be churned multiple times). Use x/(x+1) instead of hard
+    # clipping so the penalty remains bounded while preserving ordering.
+    # Use a slightly steeper saturating curve for instability-related metrics
+    # so high churn/preemption policies are penalized earlier.
+    e_raw = (metrics.evicted_pods / metrics.total_pods) if metrics.total_pods > 0 else 0.0
+    e_nonneg = max(0.0, e_raw)
+    e = e_nonneg / (e_nonneg + 0.75)
+
+    p_raw = (metrics.preemption_count / metrics.total_pods) if metrics.total_pods > 0 else 0.0
+    p_nonneg = max(0.0, p_raw)
+    p = p_nonneg / (p_nonneg + 0.5)
+
+    # Churn rate: instability metric (evicted + preempted pods / scheduled pods)
+    c_raw = max(0.0, metrics.churn_rate)  # already computed in SchedulingMetrics
+    c = c_raw / (c_raw + 0.5)
+
+    a = max(0.0, metrics.avg_scheduling_attempts)
+    a_norm = a / (a + 1.0)
+
+    # GPU waste: fraction of GPU capacity left idle. Only meaningful when the
+    # workload actually requests GPUs; returns 0 otherwise to avoid penalising
+    # non-GPU experiments for not using hardware they don't have.
+    gpu_samples = getattr(metrics, "gpu_util_samples", [])
+    if gpu_samples:
+        gpu_util = sum(gpu_samples) / len(gpu_samples)
+        g = max(0.0, min(1.0, 1.0 - gpu_util))
+    else:
+        g = 0.0
+
+    # Cost waste: placement-based cost per completed pod (run_time × node.cost_per_hour).
+    # Reference 0.005 €/pod gives k ∈ [0.59, 0.92] for the g_batchp cost-extreme cluster
+    # (cheap 0.5 €/h → 0.0072 €/pod, expensive 4.0 €/h → 0.058 €/pod, avg pod duration 52 s).
+    # LA spreads proportionally → k ≈ 0.80; GP preferring cheap nodes → k ≈ 0.59.
+    cost_per_pod = getattr(metrics, "cost_per_pod", 0.0)
+    k = cost_per_pod / (cost_per_pod + 0.005) if cost_per_pod > 0 else 0.0
+
+    raw_cost = (
+        weights.alpha_wait_time * w_norm
+        + weights.beta_resource_waste * r
+        + weights.gamma_failed_pods * f
+        + getattr(weights, "delta_evicted_pods", 0.0) * e
+        + getattr(weights, "epsilon_preemptions", 0.0) * p
+        + getattr(weights, "eta_churn", 0.0) * c
+        + getattr(weights, "zeta_scheduling_attempts", 0.0) * a_norm
+        + getattr(weights, "theta_gpu_waste", 0.0) * g
+        + getattr(weights, "iota_cost", 0.0) * k
+    )
+    return max(0.0, min(1.0, 1.0 - raw_cost))
 
 
 # ── Top-level worker for multiprocessing (must be picklable) ─────────
@@ -64,15 +144,7 @@ def _evaluate_worker(args: tuple) -> float:
 
     m = sim.collector.get_metrics()
 
-    # Compute score inline (same formula as FitnessEvaluator._compute_score)
-    w = m.avg_wait_time
-    r = 1.0 - m.avg_cpu_utilization if m.avg_cpu_utilization > 0 else 1.0
-    f = (m.rejected_pods / m.total_pods) if m.total_pods > 0 else 1.0
-    return (
-        weights.alpha_wait_time * w
-        + weights.beta_resource_waste * r
-        + weights.gamma_failed_pods * f
-    )
+    return compute_quality_score(m, weights)
 
 
 class FitnessEvaluator:
@@ -106,6 +178,8 @@ class FitnessEvaluator:
         num_instances: Optional[int] = None,
         dynamics_config: Optional[DynamicsConfig] = None,
         n_workers: int = 1,
+        aggregation_mode: str = "mean",
+        std_penalty: float = 0.0,
     ) -> None:
         self._gp_engine = gp_engine
         self._training_instances = training_instances
@@ -124,13 +198,38 @@ class FitnessEvaluator:
         # Node failure dynamics
         self._dynamics_config = dynamics_config
 
-        # Parallel evaluation
+        # Parallel evaluation — pool is created lazily and reused across all calls
         self._n_workers = min(n_workers, os.cpu_count() or 1)
+        self._pool: Optional[ProcessPoolExecutor] = None
+        self._aggregation_mode = aggregation_mode
+        self._std_penalty = std_penalty
+
+        if self._aggregation_mode not in ("mean", "mean_minus_std"):
+            raise ValueError(
+                "aggregation_mode must be 'mean' or 'mean_minus_std'"
+            )
+        if self._std_penalty < 0.0:
+            raise ValueError("std_penalty must be >= 0")
 
         if self._dynamic and (self._generator is None or self._workload_config is None):
             raise ValueError(
                 "dynamic_instances=True requires workload_generator and workload_config"
             )
+
+    def shutdown(self) -> None:
+        """Shut down the worker pool (call after training completes)."""
+        if self._pool is not None:
+            self._pool.shutdown(wait=False)
+            self._pool = None
+
+    def __del__(self) -> None:
+        self.shutdown()
+
+    def _get_pool(self) -> ProcessPoolExecutor:
+        """Return the persistent worker pool, creating it on first use."""
+        if self._pool is None:
+            self._pool = ProcessPoolExecutor(max_workers=self._n_workers)
+        return self._pool
 
     def rotate_instances(self, generation: int) -> None:
         """Regenerate training instances for the given generation.
@@ -155,7 +254,7 @@ class FitnessEvaluator:
     def __call__(self, individual: Any) -> float:
         """Fitness function signature expected by IGeneticEngine.train().
 
-        Returns a scalar fitness (lower is better).
+        Returns a scalar quality score in [0, 1] (higher is better).
         When n_workers > 1, training instances are evaluated in parallel
         using a process pool.
         """
@@ -168,7 +267,7 @@ class FitnessEvaluator:
             score = self._compute_score(metrics)
             scores.append(score)
 
-        return sum(scores) / len(scores) if scores else float("inf")
+        return self._aggregate_scores(scores)
 
     def _evaluate_parallel(self, individual: Any) -> float:
         """Evaluate training instances across multiple processes."""
@@ -192,16 +291,15 @@ class FitnessEvaluator:
             for idx, instance_pods in enumerate(self._training_instances)
         ]
 
-        with ProcessPoolExecutor(max_workers=self._n_workers) as pool:
-            scores = list(pool.map(_evaluate_worker, args))
+        scores = list(self._get_pool().map(_evaluate_worker, args))
 
-        return sum(scores) / len(scores) if scores else float("inf")
+        return self._aggregate_scores(scores)
 
     def evaluate_objectives(self, individual: Any) -> Tuple[float, float, float]:
-        """Multi-objective fitness: return (wait_time, resource_waste, rejection_rate).
+        """Multi-objective quality: return (scheduling_quality, utilization, acceptance_rate).
 
         Each objective is averaged across all training instances.
-        Lower is better for all three.
+        Higher is better for all three.
         """
         all_w: List[float] = []
         all_r: List[float] = []
@@ -209,9 +307,17 @@ class FitnessEvaluator:
 
         for idx, instance_pods in enumerate(self._training_instances):
             m = self._evaluate_single(individual, instance_pods, instance_index=idx)
-            all_w.append(m.avg_wait_time)
-            all_r.append(1.0 - m.avg_cpu_utilization if m.avg_cpu_utilization > 0 else 1.0)
-            all_f.append((m.rejected_pods / m.total_pods) if m.total_pods > 0 else 1.0)
+            # Flip each component so higher = better:
+            #   scheduling_quality = 1 - W_norm
+            #   utilization        = avg_cpu_utilization
+            #   acceptance_rate    = 1 - rejection_rate
+            w = max(0.0, m.avg_wait_time)
+            w_norm = w / (w + 1.0)
+            all_w.append(1.0 - w_norm)
+            util = max(0.0, min(1.0, m.avg_cpu_utilization))
+            all_r.append(util)
+            f = (m.rejected_pods / m.total_pods) if m.total_pods > 0 else 1.0
+            all_f.append(1.0 - max(0.0, min(1.0, f)))
 
         n = len(all_w) or 1
         return (sum(all_w) / n, sum(all_r) / n, sum(all_f) / n)
@@ -260,21 +366,28 @@ class FitnessEvaluator:
         return engine.collector.get_metrics()
 
     def _compute_score(self, m: SchedulingMetrics) -> float:
-        """Combined fitness:  α·W + β·R + γ·F
+        """Combined quality score:  1 - (α·W_norm + β·R + γ·F)
 
-        W = avg wait time (normalised by total pods)
-        R = 1 - avg_cpu_utilization  (waste = unused capacity)
-        F = rejection rate
+        W_norm = avg_wait_time / (avg_wait_time + 1)  — normalised wait, in [0,1)
+        R      = 1 - avg_cpu_utilization              — resource waste, in [0,1]
+        F      = rejected_pods / total_pods           — rejection rate, in [0,1]
+
+        Each component is clamped to [0, 1]; since α+β+γ≈1 the weighted sum
+        (the "cost") is in [0, 1].  Subtracting from 1 gives a *quality* score
+        in [0, 1] where 1.0 = perfect (no wait, full utilisation, no rejections)
+        and 0.0 = worst.  Higher is better.
         """
-        w = m.avg_wait_time
-        r = 1.0 - m.avg_cpu_utilization if m.avg_cpu_utilization > 0 else 1.0
-        f = (m.rejected_pods / m.total_pods) if m.total_pods > 0 else 1.0
+        return compute_quality_score(m, self._weights)
 
-        return (
-            self._weights.alpha_wait_time * w
-            + self._weights.beta_resource_waste * r
-            + self._weights.gamma_failed_pods * f
-        )
+    def _aggregate_scores(self, scores: List[float]) -> float:
+        """Aggregate per-instance scores into a single scalar fitness."""
+        if not scores:
+            return 0.0
+        mean = float(sum(scores) / len(scores))
+        if self._aggregation_mode == "mean":
+            return mean
+        std = float(np.std(scores))
+        return mean - (self._std_penalty * std)
 
     @staticmethod
     def _copy_pod(pod: Pod) -> Pod:
